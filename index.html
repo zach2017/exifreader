@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Metadata Extractor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl w-full">
+        <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">PDF Metadata Extractor</h1>
+        
+        <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors cursor-pointer">
+            <input type="file" id="pdfInput" accept=".pdf" class="hidden">
+            <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="text-gray-600 mb-2">Click to upload or drag and drop</p>
+            <p class="text-sm text-gray-500">PDF files only</p>
+        </div>
+
+        <div id="fileName" class="mt-4 text-center text-gray-600 hidden"></div>
+
+        <div id="loading" class="mt-6 text-center hidden">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+            <p class="mt-2 text-gray-600">Extracting metadata...</p>
+        </div>
+
+        <div id="results" class="mt-6 hidden">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">PDF Metadata</h2>
+            <div id="metadataTable" class="bg-gray-50 rounded-lg overflow-hidden">
+            </div>
+        </div>
+
+        <div id="error" class="mt-6 hidden">
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const dropZone = document.getElementById('dropZone');
+        const pdfInput = document.getElementById('pdfInput');
+        const fileName = document.getElementById('fileName');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const metadataTable = document.getElementById('metadataTable');
+        const error = document.getElementById('error');
+        const errorMessage = document.getElementById('errorMessage');
+
+        dropZone.addEventListener('click', () => pdfInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') {
+                processFile(file);
+            } else {
+                showError('Please upload a PDF file.');
+            }
+        });
+
+        pdfInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) processFile(file);
+        });
+
+        async function processFile(file) {
+            fileName.textContent = `File: ${file.name}`;
+            fileName.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            results.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const metadata = await pdf.getMetadata();
+                
+                displayMetadata(metadata, file, pdf.numPages);
+            } catch (err) {
+                showError('Failed to extract metadata: ' + err.message);
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        function displayMetadata(metadata, file, numPages) {
+            const info = metadata.info || {};
+            
+            // Standard PDF metadata
+            const standardData = [
+                { label: 'Title', value: info.Title || 'N/A' },
+                { label: 'Author', value: info.Author || 'N/A' },
+                { label: 'Subject', value: info.Subject || 'N/A' },
+                { label: 'Keywords', value: info.Keywords || 'N/A' },
+                { label: 'Creator', value: info.Creator || 'N/A' },
+                { label: 'Producer', value: info.Producer || 'N/A' },
+                { label: 'Creation Date', value: formatDate(info.CreationDate) },
+                { label: 'Modification Date', value: formatDate(info.ModDate) },
+                { label: 'PDF Version', value: info.PDFFormatVersion || 'N/A' },
+                { label: 'Page Count', value: numPages },
+                { label: 'File Size', value: formatFileSize(file.size) },
+                { label: 'File Name', value: file.name },
+            ];
+
+            // Custom classification fields
+            const classificationFields = [
+                { key: 'Classification', label: 'Classification' },
+                { key: 'SecurityLevel', label: 'Security Level' },
+                { key: 'DataSensitivity', label: 'Data Sensitivity' },
+                { key: 'Department', label: 'Department' },
+                { key: 'DocumentType', label: 'Document Type' },
+                { key: 'AccessControl', label: 'Access Control' },
+                { key: 'ComplianceCategory', label: 'Compliance Category' },
+                { key: 'RetentionPeriod', label: 'Retention Period' },
+                { key: 'ProjectCode', label: 'Project Code' },
+                { key: 'ApprovalStatus', label: 'Approval Status' },
+            ];
+
+            // Extract custom fields from metadata
+            const customData = [];
+            for (const field of classificationFields) {
+                if (info[field.key]) {
+                    customData.push({ label: field.label, value: info[field.key] });
+                }
+            }
+
+            // Check for any other custom fields not in our list
+            const knownKeys = ['Title', 'Author', 'Subject', 'Keywords', 'Creator', 'Producer', 
+                             'CreationDate', 'ModDate', 'PDFFormatVersion', 'Trapped',
+                             ...classificationFields.map(f => f.key)];
+            
+            for (const [key, value] of Object.entries(info)) {
+                if (!knownKeys.includes(key) && value) {
+                    customData.push({ label: key, value: value });
+                }
+            }
+
+            // Classification badge color
+            function getClassificationBadge(classification) {
+                const colors = {
+                    'PUBLIC': 'bg-green-100 text-green-800',
+                    'INTERNAL': 'bg-blue-100 text-blue-800',
+                    'CONFIDENTIAL': 'bg-yellow-100 text-yellow-800',
+                    'RESTRICTED': 'bg-orange-100 text-orange-800',
+                    'TOP SECRET': 'bg-red-100 text-red-800',
+                };
+                const colorClass = colors[classification] || 'bg-gray-100 text-gray-800';
+                return `<span class="px-2 py-1 rounded-full text-xs font-semibold ${colorClass}">${classification}</span>`;
+            }
+
+            let html = '<div class="mb-4"><h3 class="text-sm font-semibold text-gray-500 uppercase px-4 py-2 bg-gray-100">Standard Metadata</h3></div>';
+            
+            html += standardData.map((item, index) => `
+                <div class="flex border-b border-gray-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
+                    <div class="w-1/3 px-4 py-3 font-medium text-gray-700">${item.label}</div>
+                    <div class="w-2/3 px-4 py-3 text-gray-600 break-all">${item.value}</div>
+                </div>
+            `).join('');
+
+            if (customData.length > 0) {
+                html += '<div class="mt-4 mb-4"><h3 class="text-sm font-semibold text-gray-500 uppercase px-4 py-2 bg-gray-100">Classification & Custom Fields</h3></div>';
+                
+                html += customData.map((item, index) => {
+                    let displayValue = item.value;
+                    if (item.label === 'Classification') {
+                        displayValue = getClassificationBadge(item.value);
+                    } else if (item.label === 'Data Sensitivity') {
+                        const sensColors = {
+                            'NONE': 'text-green-600',
+                            'LOW': 'text-blue-600',
+                            'MEDIUM': 'text-yellow-600',
+                            'HIGH': 'text-orange-600',
+                            'CRITICAL': 'text-red-600 font-bold',
+                        };
+                        displayValue = `<span class="${sensColors[item.value] || ''}">${item.value}</span>`;
+                    }
+                    return `
+                        <div class="flex border-b border-gray-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
+                            <div class="w-1/3 px-4 py-3 font-medium text-gray-700">${item.label}</div>
+                            <div class="w-2/3 px-4 py-3 text-gray-600 break-all">${displayValue}</div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            metadataTable.innerHTML = html;
+            results.classList.remove('hidden');
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            try {
+                const match = dateStr.match(/D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+                if (match) {
+                    const [, year, month, day, hour, min, sec] = match;
+                    return `${year}-${month}-${day} ${hour}:${min}:${sec}`;
+                }
+                return dateStr;
+            } catch {
+                return dateStr;
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            error.classList.remove('hidden');
+            loading.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
