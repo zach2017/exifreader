@@ -1,431 +1,373 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PDF Metadata Extractor</title>
     <script src="https://cdn.tailwindcss.com"></script>
-  
-  </head>
-  <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
     <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl w-full">
-      <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">
-        PDF Metadata Extractor
-      </h1>
-
-      <div
-        id="dropZone"
-        class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors cursor-pointer"
-      >
-        <input type="file" id="pdfInput" accept=".pdf" class="hidden" />
-        <svg
-          class="mx-auto h-12 w-12 text-gray-400 mb-4"
-          stroke="currentColor"
-          fill="none"
-          viewBox="0 0 48 48"
-        >
-          <path
-            d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <p class="text-gray-600 mb-2">Click to upload or drag and drop</p>
-        <p class="text-sm text-gray-500">PDF files only</p>
-      </div>
-
-      <div id="fileName" class="mt-4 text-center text-gray-600 hidden"></div>
-
-      <div id="loading" class="mt-6 text-center hidden">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"
-        ></div>
-        <p class="mt-2 text-gray-600">Extracting metadata...</p>
-      </div>
-
-      <div id="results" class="mt-6 hidden">
-        <h2 class="text-lg font-semibold text-gray-800 mb-4">PDF Metadata</h2>
-        <div
-          id="metadataTable"
-          class="bg-gray-50 rounded-lg overflow-hidden"
-        ></div>
-      </div>
-
-      <div id="error" class="mt-6 hidden">
-        <div
-          class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded"
-        >
-          <p id="errorMessage"></p>
+        <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">PDF Metadata Extractor</h1>
+        
+        <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors cursor-pointer">
+            <input type="file" id="pdfInput" accept=".pdf" class="hidden">
+            <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="text-gray-600 mb-2">Click to upload or drag and drop</p>
+            <p class="text-sm text-gray-500">PDF files only</p>
         </div>
-      </div>
-    </div>
-    <script src="pdf.worker.min.js"></script>  <!-- Load FIRST -->
 
+        <div id="fileName" class="mt-4 text-center text-gray-600 hidden"></div>
+
+        <div id="loading" class="mt-6 text-center hidden">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+            <p class="mt-2 text-gray-600">Extracting metadata...</p>
+        </div>
+
+        <div id="results" class="mt-6 hidden">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">PDF Metadata</h2>
+            <div id="metadataTable" class="bg-gray-50 rounded-lg overflow-hidden">
+            </div>
+        </div>
+
+        <div id="error" class="mt-6 hidden">
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+    </div>
 
     <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-      const dropZone = document.getElementById("dropZone");
-      const pdfInput = document.getElementById("pdfInput");
-      const fileNameEl = document.getElementById("fileName");
-      const loading = document.getElementById("loading");
-      const results = document.getElementById("results");
-      const metadataTable = document.getElementById("metadataTable");
-      const error = document.getElementById("error");
-      const errorMessage = document.getElementById("errorMessage");
+        const dropZone = document.getElementById('dropZone');
+        const pdfInput = document.getElementById('pdfInput');
+        const fileNameEl = document.getElementById('fileName');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const metadataTable = document.getElementById('metadataTable');
+        const error = document.getElementById('error');
+        const errorMessage = document.getElementById('errorMessage');
 
-      dropZone.addEventListener("click", () => pdfInput.click());
+        dropZone.addEventListener('click', () => pdfInput.click());
 
-      dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("border-blue-500", "bg-blue-50");
-      });
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
 
-      dropZone.addEventListener("dragleave", () => {
-        dropZone.classList.remove("border-blue-500", "bg-blue-50");
-      });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
 
-      dropZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropZone.classList.remove("border-blue-500", "bg-blue-50");
-        const file = e.dataTransfer.files[0];
-        if (file && file.type === "application/pdf") {
-          processFile(file);
-        } else {
-          showError("Please upload a PDF file.");
-        }
-      });
-
-      pdfInput.addEventListener("change", (e) => {
-        const file = e.target.files[0];
-        if (file) processFile(file);
-      });
-
-      async function processFile(file) {
-        fileNameEl.textContent = `File: ${file.name}`;
-        fileNameEl.classList.remove("hidden");
-        loading.classList.remove("hidden");
-        results.classList.add("hidden");
-        error.classList.add("hidden");
-
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-
-          // Extract custom fields directly from PDF binary
-          const customFields = extractCustomFieldsFromPDF(arrayBuffer);
-
-          // Also get standard metadata via PDF.js
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-          const metadata = await pdf.getMetadata();
-
-          console.log("PDF.js metadata.info:", metadata.info);
-          console.log("Extracted custom fields:", customFields);
-
-          displayMetadata(metadata, file, pdf.numPages, customFields);
-        } catch (err) {
-          console.error("Error:", err);
-          showError("Failed to extract metadata: " + err.message);
-        } finally {
-          loading.classList.add("hidden");
-        }
-      }
-
-      // Extract CustomFields directly from PDF binary
-      function extractCustomFieldsFromPDF(arrayBuffer) {
-        try {
-          const bytes = new Uint8Array(arrayBuffer);
-          const text = new TextDecoder("latin1").decode(bytes);
-
-          // Find /CustomFields and extract the parenthesized string value
-          const startMarker = "/CustomFields";
-          const startIdx = text.indexOf(startMarker);
-
-          if (startIdx === -1) {
-            console.log("No /CustomFields marker found in PDF");
-            return null;
-          }
-
-          // Find the opening parenthesis
-          let searchStart = startIdx + startMarker.length;
-          let parenStart = -1;
-
-          for (
-            let i = searchStart;
-            i < Math.min(searchStart + 50, text.length);
-            i++
-          ) {
-            if (text[i] === "(") {
-              parenStart = i;
-              break;
-            }
-          }
-
-          if (parenStart === -1) {
-            console.log("No opening parenthesis found after /CustomFields");
-            return null;
-          }
-
-          // Extract content between parentheses, handling escapes and nested parens
-          let depth = 1;
-          let content = "";
-          let i = parenStart + 1;
-
-          while (i < text.length && depth > 0) {
-            const char = text[i];
-
-            if (char === "\\" && i + 1 < text.length) {
-              const nextChar = text[i + 1];
-
-              // Check for octal escape sequence (e.g., \042 for ")
-              if (nextChar >= "0" && nextChar <= "7") {
-                let octalStr = "";
-                let j = i + 1;
-                while (
-                  j < text.length &&
-                  j < i + 4 &&
-                  text[j] >= "0" &&
-                  text[j] <= "7"
-                ) {
-                  octalStr += text[j];
-                  j++;
-                }
-                const charCode = parseInt(octalStr, 8);
-                content += String.fromCharCode(charCode);
-                i = j;
-              } else if (nextChar === "(") {
-                content += "(";
-                i += 2;
-              } else if (nextChar === ")") {
-                content += ")";
-                i += 2;
-              } else if (nextChar === "\\") {
-                content += "\\";
-                i += 2;
-              } else if (nextChar === "n") {
-                content += "\n";
-                i += 2;
-              } else if (nextChar === "r") {
-                content += "\r";
-                i += 2;
-              } else if (nextChar === "t") {
-                content += "\t";
-                i += 2;
-              } else {
-                content += nextChar;
-                i += 2;
-              }
-            } else if (char === "(") {
-              depth++;
-              content += char;
-              i++;
-            } else if (char === ")") {
-              depth--;
-              if (depth > 0) {
-                content += char;
-              }
-              i++;
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') {
+                processFile(file);
             } else {
-              content += char;
-              i++;
+                showError('Please upload a PDF file.');
             }
-          }
+        });
 
-          console.log("Extracted CustomFields raw string:", content);
+        pdfInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) processFile(file);
+        });
 
-          // Parse as JSON
-          try {
-            return JSON.parse(content);
-          } catch (e) {
-            console.error("Failed to parse CustomFields JSON:", e);
-            console.log("Content was:", content);
+        async function processFile(file) {
+            fileNameEl.textContent = `File: ${file.name}`;
+            fileNameEl.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            results.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                
+                // Extract custom fields directly from PDF binary
+                const customFields = extractCustomFieldsFromPDF(arrayBuffer);
+                
+                // Also get standard metadata via PDF.js
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const metadata = await pdf.getMetadata();
+                
+                console.log('PDF.js metadata.info:', metadata.info);
+                console.log('Extracted custom fields:', customFields);
+                
+                displayMetadata(metadata, file, pdf.numPages, customFields);
+            } catch (err) {
+                console.error('Error:', err);
+                showError('Failed to extract metadata: ' + err.message);
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        // Extract CustomFields directly from PDF binary
+        function extractCustomFieldsFromPDF(arrayBuffer) {
+            try {
+                const bytes = new Uint8Array(arrayBuffer);
+                const text = new TextDecoder('latin1').decode(bytes);
+                
+                // Find /CustomFields and extract the parenthesized string value
+                const startMarker = '/CustomFields';
+                const startIdx = text.indexOf(startMarker);
+                
+                if (startIdx === -1) {
+                    console.log('No /CustomFields marker found in PDF');
+                    return null;
+                }
+                
+                // Find the opening parenthesis
+                let searchStart = startIdx + startMarker.length;
+                let parenStart = -1;
+                
+                for (let i = searchStart; i < Math.min(searchStart + 50, text.length); i++) {
+                    if (text[i] === '(') {
+                        parenStart = i;
+                        break;
+                    }
+                }
+                
+                if (parenStart === -1) {
+                    console.log('No opening parenthesis found after /CustomFields');
+                    return null;
+                }
+                
+                // Extract content between parentheses, handling escapes and nested parens
+                let depth = 1;
+                let content = '';
+                let i = parenStart + 1;
+                
+                while (i < text.length && depth > 0) {
+                    const char = text[i];
+                    
+                    if (char === '\\' && i + 1 < text.length) {
+                        const nextChar = text[i + 1];
+                        
+                        // Check for octal escape sequence (e.g., \042 for ")
+                        if (nextChar >= '0' && nextChar <= '7') {
+                            let octalStr = '';
+                            let j = i + 1;
+                            while (j < text.length && j < i + 4 && text[j] >= '0' && text[j] <= '7') {
+                                octalStr += text[j];
+                                j++;
+                            }
+                            const charCode = parseInt(octalStr, 8);
+                            content += String.fromCharCode(charCode);
+                            i = j;
+                        } else if (nextChar === '(') {
+                            content += '(';
+                            i += 2;
+                        } else if (nextChar === ')') {
+                            content += ')';
+                            i += 2;
+                        } else if (nextChar === '\\') {
+                            content += '\\';
+                            i += 2;
+                        } else if (nextChar === 'n') {
+                            content += '\n';
+                            i += 2;
+                        } else if (nextChar === 'r') {
+                            content += '\r';
+                            i += 2;
+                        } else if (nextChar === 't') {
+                            content += '\t';
+                            i += 2;
+                        } else {
+                            content += nextChar;
+                            i += 2;
+                        }
+                    } else if (char === '(') {
+                        depth++;
+                        content += char;
+                        i++;
+                    } else if (char === ')') {
+                        depth--;
+                        if (depth > 0) {
+                            content += char;
+                        }
+                        i++;
+                    } else {
+                        content += char;
+                        i++;
+                    }
+                }
+                
+                console.log('Extracted CustomFields raw string:', content);
+                
+                // Parse as JSON
+                try {
+                    return JSON.parse(content);
+                } catch (e) {
+                    console.error('Failed to parse CustomFields JSON:', e);
+                    console.log('Content was:', content);
+                    return null;
+                }
+                
+            } catch (e) {
+                console.error('Error extracting custom fields:', e);
+            }
             return null;
-          }
-        } catch (e) {
-          console.error("Error extracting custom fields:", e);
-        }
-        return null;
-      }
-
-      function displayMetadata(metadata, file, numPages, customFields) {
-        const info = metadata.info || {};
-
-        // Check if CustomFields is in info (PDF.js might include it)
-        if (!customFields && info.CustomFields) {
-          try {
-            customFields = JSON.parse(info.CustomFields);
-          } catch (e) {
-            console.log("Failed to parse info.CustomFields");
-          }
         }
 
-        // Standard PDF metadata
-        const standardData = [
-          { label: "Title", value: info.Title || "N/A" },
-          { label: "Author", value: info.Author || "N/A" },
-          { label: "Subject", value: info.Subject || "N/A" },
-          { label: "Keywords", value: info.Keywords || "N/A" },
-          { label: "Creator", value: info.Creator || "N/A" },
-          { label: "Producer", value: info.Producer || "N/A" },
-          { label: "Creation Date", value: formatDate(info.CreationDate) },
-          { label: "Modification Date", value: formatDate(info.ModDate) },
-          { label: "PDF Version", value: info.PDFFormatVersion || "N/A" },
-          { label: "Page Count", value: numPages },
-          { label: "File Size", value: formatFileSize(file.size) },
-          { label: "File Name", value: file.name },
-        ];
-
-        // Classification badge
-        function getClassificationBadge(classification) {
-          const colors = {
-            PUBLIC: "bg-green-100 text-green-800 border-green-300",
-            INTERNAL: "bg-blue-100 text-blue-800 border-blue-300",
-            CONFIDENTIAL: "bg-yellow-100 text-yellow-800 border-yellow-300",
-            RESTRICTED: "bg-orange-100 text-orange-800 border-orange-300",
-            "TOP SECRET": "bg-red-100 text-red-800 border-red-300",
-          };
-          const colorClass =
-            colors[classification] ||
-            "bg-gray-100 text-gray-800 border-gray-300";
-          return `<span class="px-3 py-1 rounded-full text-xs font-bold border ${colorClass}">${classification}</span>`;
-        }
-
-        // Sensitivity badge
-        function getSensitivityBadge(sensitivity) {
-          const colors = {
-            NONE: "text-green-600",
-            LOW: "text-blue-600",
-            MEDIUM: "text-yellow-600",
-            HIGH: "text-orange-600 font-semibold",
-            CRITICAL: "text-red-600 font-bold",
-          };
-          return `<span class="${colors[sensitivity] || "text-gray-600"}">${sensitivity}</span>`;
-        }
-
-        // Render a value (handles primitives, arrays, objects)
-        function renderValue(value, key = "") {
-          if (value === null || value === undefined)
-            return '<span class="text-gray-400">N/A</span>';
-
-          if (typeof value === "boolean") {
-            return value
-              ? '<span class="text-green-600 font-medium">✓ Yes</span>'
-              : '<span class="text-red-600 font-medium">✗ No</span>';
-          }
-
-          if (Array.isArray(value)) {
-            if (value.length === 0)
-              return '<span class="text-gray-400">Empty</span>';
-            return `<div class="flex flex-wrap gap-1">${value
-              .map(
-                (v) =>
-                  `<span class="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-xs">${v}</span>`,
-              )
-              .join("")}</div>`;
-          }
-
-          if (typeof value === "object") {
-            return renderNestedObject(value);
-          }
-
-          // Special formatting for specific keys
-          if (key === "classification") return getClassificationBadge(value);
-          if (key === "dataSensitivity") return getSensitivityBadge(value);
-          if (key === "securityLevel") {
-            const levelColors = [
-              "green",
-              "blue",
-              "yellow",
-              "yellow",
-              "orange",
-              "red",
+        function displayMetadata(metadata, file, numPages, customFields) {
+            const info = metadata.info || {};
+            
+            // Check if CustomFields is in info (PDF.js might include it)
+            if (!customFields && info.CustomFields) {
+                try {
+                    customFields = JSON.parse(info.CustomFields);
+                } catch (e) {
+                    console.log('Failed to parse info.CustomFields');
+                }
+            }
+            
+            // Standard PDF metadata
+            const standardData = [
+                { label: 'Title', value: info.Title || 'N/A' },
+                { label: 'Author', value: info.Author || 'N/A' },
+                { label: 'Subject', value: info.Subject || 'N/A' },
+                { label: 'Keywords', value: info.Keywords || 'N/A' },
+                { label: 'Creator', value: info.Creator || 'N/A' },
+                { label: 'Producer', value: info.Producer || 'N/A' },
+                { label: 'Creation Date', value: formatDate(info.CreationDate) },
+                { label: 'Modification Date', value: formatDate(info.ModDate) },
+                { label: 'PDF Version', value: info.PDFFormatVersion || 'N/A' },
+                { label: 'Page Count', value: numPages },
+                { label: 'File Size', value: formatFileSize(file.size) },
+                { label: 'File Name', value: file.name },
             ];
-            const color = levelColors[Math.min(value, 5)] || "gray";
-            return `<span class="inline-flex items-center px-2 py-0.5 rounded text-sm font-medium bg-${color}-100 text-${color}-800">Level ${value}</span>`;
-          }
 
-          return `<span class="text-gray-700">${value}</span>`;
-        }
+            // Classification badge
+            function getClassificationBadge(classification) {
+                const colors = {
+                    'PUBLIC': 'bg-green-100 text-green-800 border-green-300',
+                    'INTERNAL': 'bg-blue-100 text-blue-800 border-blue-300',
+                    'CONFIDENTIAL': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+                    'RESTRICTED': 'bg-orange-100 text-orange-800 border-orange-300',
+                    'TOP SECRET': 'bg-red-100 text-red-800 border-red-300',
+                };
+                const colorClass = colors[classification] || 'bg-gray-100 text-gray-800 border-gray-300';
+                return `<span class="px-3 py-1 rounded-full text-xs font-bold border ${colorClass}">${classification}</span>`;
+            }
 
-        // Render nested object
-        function renderNestedObject(obj, depth = 0) {
-          const entries = Object.entries(obj);
-          if (entries.length === 0)
-            return '<span class="text-gray-400">Empty</span>';
+            // Sensitivity badge
+            function getSensitivityBadge(sensitivity) {
+                const colors = {
+                    'NONE': 'text-green-600',
+                    'LOW': 'text-blue-600',
+                    'MEDIUM': 'text-yellow-600',
+                    'HIGH': 'text-orange-600 font-semibold',
+                    'CRITICAL': 'text-red-600 font-bold',
+                };
+                return `<span class="${colors[sensitivity] || 'text-gray-600'}">${sensitivity}</span>`;
+            }
 
-          return `<div class="${depth > 0 ? "pl-3 border-l-2 border-gray-200 ml-1" : ""}">
-                    ${entries
-                      .map(
-                        ([k, v]) => `
+            // Render a value (handles primitives, arrays, objects)
+            function renderValue(value, key = '') {
+                if (value === null || value === undefined) return '<span class="text-gray-400">N/A</span>';
+                
+                if (typeof value === 'boolean') {
+                    return value 
+                        ? '<span class="text-green-600 font-medium">✓ Yes</span>' 
+                        : '<span class="text-red-600 font-medium">✗ No</span>';
+                }
+                
+                if (Array.isArray(value)) {
+                    if (value.length === 0) return '<span class="text-gray-400">Empty</span>';
+                    return `<div class="flex flex-wrap gap-1">${value.map(v => 
+                        `<span class="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-xs">${v}</span>`
+                    ).join('')}</div>`;
+                }
+                
+                if (typeof value === 'object') {
+                    return renderNestedObject(value);
+                }
+
+                // Special formatting for specific keys
+                if (key === 'classification') return getClassificationBadge(value);
+                if (key === 'dataSensitivity') return getSensitivityBadge(value);
+                if (key === 'securityLevel') {
+                    const levelColors = ['green', 'blue', 'yellow', 'yellow', 'orange', 'red'];
+                    const color = levelColors[Math.min(value, 5)] || 'gray';
+                    return `<span class="inline-flex items-center px-2 py-0.5 rounded text-sm font-medium bg-${color}-100 text-${color}-800">Level ${value}</span>`;
+                }
+                
+                return `<span class="text-gray-700">${value}</span>`;
+            }
+
+            // Render nested object
+            function renderNestedObject(obj, depth = 0) {
+                const entries = Object.entries(obj);
+                if (entries.length === 0) return '<span class="text-gray-400">Empty</span>';
+                
+                return `<div class="${depth > 0 ? 'pl-3 border-l-2 border-gray-200 ml-1' : ''}">
+                    ${entries.map(([k, v]) => `
                         <div class="py-1">
                             <span class="text-gray-500 text-sm">${formatKey(k)}:</span>
                             <span class="ml-2">${renderValue(v, k)}</span>
                         </div>
-                    `,
-                      )
-                      .join("")}
+                    `).join('')}
                 </div>`;
-        }
+            }
 
-        // Format camelCase key to Title Case
-        function formatKey(key) {
-          return key
-            .replace(/([A-Z])/g, " $1")
-            .replace(/^./, (str) => str.toUpperCase())
-            .trim();
-        }
+            // Format camelCase key to Title Case
+            function formatKey(key) {
+                return key
+                    .replace(/([A-Z])/g, ' $1')
+                    .replace(/^./, str => str.toUpperCase())
+                    .trim();
+            }
 
-        // Build HTML
-        let html =
-          '<div class="mb-2"><h3 class="text-sm font-semibold text-gray-500 uppercase px-4 py-2 bg-gray-100 rounded-t">Standard Metadata</h3></div>';
-
-        html += standardData
-          .map(
-            (item, index) => `
-                <div class="flex border-b border-gray-200 ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}">
+            // Build HTML
+            let html = '<div class="mb-2"><h3 class="text-sm font-semibold text-gray-500 uppercase px-4 py-2 bg-gray-100 rounded-t">Standard Metadata</h3></div>';
+            
+            html += standardData.map((item, index) => `
+                <div class="flex border-b border-gray-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
                     <div class="w-1/3 px-4 py-3 font-medium text-gray-700">${item.label}</div>
                     <div class="w-2/3 px-4 py-3 text-gray-600 break-all">${item.value}</div>
                 </div>
-            `,
-          )
-          .join("");
+            `).join('');
 
-        // Display custom fields if found
-        if (customFields && Object.keys(customFields).length > 0) {
-          html += `<div class="mt-6 mb-2"><h3 class="text-sm font-semibold text-gray-500 uppercase px-4 py-2 bg-gray-100 rounded-t">Custom Fields (JSON)</h3></div>`;
+            // Display custom fields if found
+            if (customFields && Object.keys(customFields).length > 0) {
+                html += `<div class="mt-6 mb-2"><h3 class="text-sm font-semibold text-gray-500 uppercase px-4 py-2 bg-gray-100 rounded-t">Custom Fields (JSON)</h3></div>`;
+                
+                // Classification header banner if present
+                if (customFields.classification) {
+                    const bannerColors = {
+                        'PUBLIC': 'bg-green-500',
+                        'INTERNAL': 'bg-blue-500',
+                        'CONFIDENTIAL': 'bg-yellow-500',
+                        'RESTRICTED': 'bg-orange-500',
+                        'TOP SECRET': 'bg-red-600',
+                    };
+                    const bannerColor = bannerColors[customFields.classification] || 'bg-gray-500';
+                    html += `<div class="${bannerColor} text-white px-4 py-2 text-center font-bold text-sm tracking-wide">${customFields.classification}</div>`;
+                }
 
-          // Classification header banner if present
-          if (customFields.classification) {
-            const bannerColors = {
-              PUBLIC: "bg-green-500",
-              INTERNAL: "bg-blue-500",
-              CONFIDENTIAL: "bg-yellow-500",
-              RESTRICTED: "bg-orange-500",
-              "TOP SECRET": "bg-red-600",
-            };
-            const bannerColor =
-              bannerColors[customFields.classification] || "bg-gray-500";
-            html += `<div class="${bannerColor} text-white px-4 py-2 text-center font-bold text-sm tracking-wide">${customFields.classification}</div>`;
-          }
-
-          let rowIndex = 0;
-          for (const [key, value] of Object.entries(customFields)) {
-            const isObject =
-              typeof value === "object" &&
-              !Array.isArray(value) &&
-              value !== null;
-            html += `
-                        <div class="border-b border-gray-200 ${rowIndex % 2 === 0 ? "bg-white" : "bg-gray-50"}">
-                            <div class="flex ${isObject ? "flex-col" : ""}">
-                                <div class="${isObject ? "px-4 py-2 font-medium text-gray-700 bg-gray-50" : "w-1/3 px-4 py-3 font-medium text-gray-700"}">${formatKey(key)}</div>
-                                <div class="${isObject ? "px-4 py-3" : "w-2/3 px-4 py-3"} text-gray-600 break-all">${renderValue(value, key)}</div>
+                let rowIndex = 0;
+                for (const [key, value] of Object.entries(customFields)) {
+                    const isObject = typeof value === 'object' && !Array.isArray(value) && value !== null;
+                    html += `
+                        <div class="border-b border-gray-200 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
+                            <div class="flex ${isObject ? 'flex-col' : ''}">
+                                <div class="${isObject ? 'px-4 py-2 font-medium text-gray-700 bg-gray-50' : 'w-1/3 px-4 py-3 font-medium text-gray-700'}">${formatKey(key)}</div>
+                                <div class="${isObject ? 'px-4 py-3' : 'w-2/3 px-4 py-3'} text-gray-600 break-all">${renderValue(value, key)}</div>
                             </div>
                         </div>
                     `;
-            rowIndex++;
-          }
+                    rowIndex++;
+                }
 
-          // Raw JSON toggle
-          html += `
+                // Raw JSON toggle
+                html += `
                     <div class="mt-4 px-4 pb-4">
                         <button onclick="toggleRawJson()" class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
                             <svg id="jsonToggleIcon" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -436,57 +378,51 @@
                         <pre id="rawJson" class="hidden mt-2 bg-gray-800 text-green-400 p-4 rounded text-xs overflow-auto max-h-64">${JSON.stringify(customFields, null, 2)}</pre>
                     </div>
                 `;
-        } else {
-          html += `
+            } else {
+                html += `
                     <div class="mt-6 p-4 bg-gray-50 rounded text-gray-500 text-center">
                         <p>No custom fields found in this PDF.</p>
                         <p class="text-sm mt-1">Custom fields should be stored in the /CustomFields metadata key as JSON.</p>
                     </div>
                 `;
+            }
+
+            metadataTable.innerHTML = html;
+            results.classList.remove('hidden');
         }
 
-        metadataTable.innerHTML = html;
-        results.classList.remove("hidden");
-      }
-
-      function toggleRawJson() {
-        const rawJson = document.getElementById("rawJson");
-        const icon = document.getElementById("jsonToggleIcon");
-        rawJson.classList.toggle("hidden");
-        icon.style.transform = rawJson.classList.contains("hidden")
-          ? ""
-          : "rotate(90deg)";
-      }
-
-      function formatDate(dateStr) {
-        if (!dateStr) return "N/A";
-        try {
-          const match = dateStr.match(
-            /D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/,
-          );
-          if (match) {
-            const [, year, month, day, hour, min, sec] = match;
-            return `${year}-${month}-${day} ${hour}:${min}:${sec}`;
-          }
-          return dateStr;
-        } catch {
-          return dateStr;
+        function toggleRawJson() {
+            const rawJson = document.getElementById('rawJson');
+            const icon = document.getElementById('jsonToggleIcon');
+            rawJson.classList.toggle('hidden');
+            icon.style.transform = rawJson.classList.contains('hidden') ? '' : 'rotate(90deg)';
         }
-      }
 
-      function formatFileSize(bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB";
-        return (bytes / (1024 * 1024)).toFixed(2) + " MB";
-      }
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            try {
+                const match = dateStr.match(/D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+                if (match) {
+                    const [, year, month, day, hour, min, sec] = match;
+                    return `${year}-${month}-${day} ${hour}:${min}:${sec}`;
+                }
+                return dateStr;
+            } catch {
+                return dateStr;
+            }
+        }
 
-      function showError(msg) {
-        errorMessage.textContent = msg;
-        error.classList.remove("hidden");
-        loading.classList.add("hidden");
-      }
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            error.classList.remove('hidden');
+            loading.classList.add('hidden');
+        }
     </script>
-      <script src="pdf.min.js"></script>
-      Works
-  </body>
+</body>
 </html>
