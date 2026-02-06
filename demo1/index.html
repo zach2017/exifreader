@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Metadata, Image &amp; OCR Extractor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .img-thumb { transition: transform .15s; }
+        .img-thumb:hover { transform: scale(1.03); }
+        #lightbox { display:none; }
+        #lightbox.active { display:flex; }
+        .timing-bar { transition: width 0.5s ease-out; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+        .animate-pulse-slow { animation: pulse 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+
+    <!-- Lightbox -->
+    <div id="lightbox" class="fixed inset-0 bg-black/80 z-50 items-center justify-center p-4" onclick="closeLightbox(event)">
+        <button onclick="closeLightbox()" class="absolute top-4 right-4 text-white text-3xl font-bold z-10 hover:text-gray-300">&times;</button>
+        <img id="lightboxImg" class="max-h-[90vh] max-w-[90vw] object-contain rounded shadow-2xl" />
+        <div id="lightboxCaption" class="absolute bottom-6 left-0 right-0 text-center text-white text-sm bg-black/50 py-2"></div>
+    </div>
+
+    <div class="max-w-5xl mx-auto">
+
+        <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">PDF Metadata, Image &amp; OCR Extractor</h1>
+        <p class="text-center text-gray-500 mb-6 text-sm">Extract metadata &amp; images, then benchmark Lambda-per-image OCR vs direct Tesseract OCR</p>
+
+        <!-- Upload -->
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-6">
+            <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors cursor-pointer">
+                <input type="file" id="pdfInput" accept=".pdf" class="hidden">
+                <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <p class="text-gray-600 mb-2">Click to upload or drag and drop</p>
+                <p class="text-sm text-gray-500">PDF files only &middot; max 50 MB</p>
+            </div>
+            <div id="fileName" class="mt-4 text-center text-gray-600 hidden"></div>
+
+            <!-- Progress -->
+            <div id="progress" class="mt-4 hidden">
+                <div class="flex items-center gap-3">
+                    <div class="flex-1 bg-gray-200 rounded-full h-2">
+                        <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+                    </div>
+                    <span id="progressText" class="text-sm text-gray-500 w-32 text-right">Uploading…</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error -->
+        <div id="error" class="hidden mb-6">
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+
+        <!-- Results wrapper -->
+        <div id="results" class="hidden space-y-6">
+
+            <!-- Standard metadata -->
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden">
+                <h2 class="text-lg font-semibold text-gray-800 px-6 py-4 border-b">Standard Metadata</h2>
+                <div id="standardMeta"></div>
+            </div>
+
+            <!-- Custom fields -->
+            <div id="customSection" class="bg-white rounded-lg shadow-lg overflow-hidden hidden">
+                <h2 class="text-lg font-semibold text-gray-800 px-6 py-4 border-b">Custom Fields (JSON)</h2>
+                <div id="classificationBanner"></div>
+                <div id="customMeta"></div>
+                <div class="px-6 py-4 border-t">
+                    <button onclick="toggleRawJson()" class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                        <svg id="jsonToggleIcon" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                        Show Raw JSON
+                    </button>
+                    <pre id="rawJson" class="hidden mt-2 bg-gray-800 text-green-400 p-4 rounded text-xs overflow-auto max-h-64"></pre>
+                </div>
+            </div>
+
+            <!-- PDF embedded text -->
+            <div id="pdfTextSection" class="bg-white rounded-lg shadow-lg overflow-hidden hidden">
+                <button onclick="toggleSection('pdfTextContent','pdfTextToggle')" class="w-full flex items-center justify-between px-6 py-4 border-b hover:bg-gray-50">
+                    <h2 class="text-lg font-semibold text-gray-800">PDF Embedded Text</h2>
+                    <svg id="pdfTextToggle" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div id="pdfTextContent" class="hidden p-6">
+                    <div id="pdfTextBody" class="text-sm text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 p-4 rounded max-h-96 overflow-auto"></div>
+                </div>
+            </div>
+
+            <!-- Extracted images -->
+            <div id="imagesSection" class="bg-white rounded-lg shadow-lg overflow-hidden hidden">
+                <div class="flex items-center justify-between px-6 py-4 border-b">
+                    <h2 class="text-lg font-semibold text-gray-800">
+                        Extracted Images <span id="imageCount" class="text-sm font-normal text-gray-500"></span>
+                    </h2>
+                    <a id="downloadAllBtn" href="#" class="hidden text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                        ⬇ Download All (.zip)
+                    </a>
+                </div>
+                <div id="imageGrid" class="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4"></div>
+            </div>
+
+            <!-- No images -->
+            <div id="noImages" class="bg-white rounded-lg shadow-lg p-6 text-center text-gray-500 hidden">
+                No images found in this PDF.
+            </div>
+
+            <!-- ════════════════════════════════════════ -->
+            <!--  OCR BENCHMARK SECTION                  -->
+            <!-- ════════════════════════════════════════ -->
+            <div id="ocrBenchSection" class="bg-white rounded-lg shadow-lg overflow-hidden">
+                <div class="px-6 py-4 border-b flex items-center justify-between">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-800">OCR Benchmark</h2>
+                        <p class="text-xs text-gray-500 mt-1">Compare Lambda per-image OCR vs direct Tesseract on full PDF pages</p>
+                    </div>
+                    <button id="runOcrBtn" onclick="runOcrBenchmark()" class="bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        Run OCR Benchmark
+                    </button>
+                </div>
+
+                <!-- OCR loading -->
+                <div id="ocrLoading" class="hidden p-8 text-center">
+                    <div class="inline-flex items-center gap-3 text-purple-600">
+                        <svg class="animate-spin h-6 w-6" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span class="text-sm font-medium animate-pulse-slow">Running OCR benchmark — this may take a moment…</span>
+                    </div>
+                </div>
+
+                <!-- OCR results -->
+                <div id="ocrResults" class="hidden">
+
+                    <!-- Summary card -->
+                    <div id="ocrSummary" class="m-6 rounded-xl border-2 p-6"></div>
+
+                    <!-- Timing chart -->
+                    <div id="ocrTimingChart" class="px-6 pb-4"></div>
+
+                    <!-- Lambda per-image results -->
+                    <div class="border-t">
+                        <button onclick="toggleSection('lambdaDetails','lambdaToggle')" class="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50">
+                            <h3 class="text-md font-semibold text-orange-700 flex items-center gap-2">
+                                <span class="w-3 h-3 bg-orange-500 rounded-full inline-block"></span>
+                                Lambda Per-Image OCR Results
+                                <span id="lambdaCount" class="text-sm font-normal text-gray-500"></span>
+                            </h3>
+                            <svg id="lambdaToggle" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </button>
+                        <div id="lambdaDetails" class="hidden px-6 pb-6 space-y-3"></div>
+                    </div>
+
+                    <!-- Direct Tesseract results -->
+                    <div class="border-t">
+                        <button onclick="toggleSection('directDetails','directToggle')" class="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50">
+                            <h3 class="text-md font-semibold text-blue-700 flex items-center gap-2">
+                                <span class="w-3 h-3 bg-blue-500 rounded-full inline-block"></span>
+                                Direct Tesseract OCR Results
+                                <span id="directCount" class="text-sm font-normal text-gray-500"></span>
+                            </h3>
+                            <svg id="directToggle" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </button>
+                        <div id="directDetails" class="hidden px-6 pb-6 space-y-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentJobId = null;
+
+        const dropZone     = document.getElementById('dropZone');
+        const pdfInput     = document.getElementById('pdfInput');
+        const fileNameEl   = document.getElementById('fileName');
+        const progress     = document.getElementById('progress');
+        const progressBar  = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const results      = document.getElementById('results');
+        const errorDiv     = document.getElementById('error');
+        const errorMessage = document.getElementById('errorMessage');
+
+        /* ── Drop / click ── */
+        dropZone.addEventListener('click', () => pdfInput.click());
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500','bg-blue-50'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500','bg-blue-50'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500','bg-blue-50');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') processFile(file);
+            else showError('Please upload a PDF file.');
+        });
+        pdfInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+
+        /* ── Upload & extract ── */
+        async function processFile(file) {
+            fileNameEl.textContent = `File: ${file.name}`;
+            fileNameEl.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+            results.classList.add('hidden');
+            document.getElementById('ocrResults').classList.add('hidden');
+            progress.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressText.textContent = 'Uploading…';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const data = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/extract');
+
+                    xhr.upload.onprogress = e => {
+                        if (e.lengthComputable) {
+                            const pct = Math.round(e.loaded / e.total * 70);
+                            progressBar.style.width = pct + '%';
+                            progressText.textContent = `Uploading… ${pct}%`;
+                        }
+                    };
+
+                    xhr.onload = () => {
+                        progressBar.style.width = '100%';
+                        progressText.textContent = 'Done';
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try { resolve(JSON.parse(xhr.responseText)); }
+                            catch { reject(new Error('Invalid JSON response')); }
+                        } else {
+                            try {
+                                const err = JSON.parse(xhr.responseText);
+                                reject(new Error(err.error || `HTTP ${xhr.status}`));
+                            } catch { reject(new Error(`HTTP ${xhr.status}`)); }
+                        }
+                    };
+
+                    xhr.onerror = () => reject(new Error('Network error'));
+                    xhr.onreadystatechange = () => {
+                        if (xhr.readyState === 3) {
+                            progressBar.style.width = '85%';
+                            progressText.textContent = 'Extracting…';
+                        }
+                    };
+                    xhr.send(formData);
+                });
+
+                currentJobId = data.jobId;
+                displayResults(data, file);
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                setTimeout(() => progress.classList.add('hidden'), 800);
+            }
+        }
+
+        /* ── Render ── */
+        function displayResults(data, file) {
+            results.classList.remove('hidden');
+            renderStandardMetadata(data.standardMetadata, file);
+            renderCustomFields(data.customFields);
+            renderImages(data.images, data.jobId);
+            renderPdfText(data.pdfText);
+
+            // Reset OCR section
+            document.getElementById('ocrResults').classList.add('hidden');
+            document.getElementById('ocrLoading').classList.add('hidden');
+            document.getElementById('runOcrBtn').disabled = false;
+        }
+
+        /* ── Standard metadata table ── */
+        function renderStandardMetadata(meta) {
+            const rows = [
+                ['Title',             meta.title || 'N/A'],
+                ['Author',            meta.author || 'N/A'],
+                ['Subject',           meta.subject || 'N/A'],
+                ['Keywords',          meta.keywords || 'N/A'],
+                ['Creator',           meta.creator || 'N/A'],
+                ['Producer',          meta.producer || 'N/A'],
+                ['Creation Date',     meta.creationDate || 'N/A'],
+                ['Modification Date', meta.modDate || 'N/A'],
+                ['PDF Format',        meta.format || 'N/A'],
+                ['Encryption',        meta.encryption || 'None'],
+                ['Page Count',        meta.pageCount],
+                ['File Size',         formatFileSize(meta.fileSize)],
+                ['File Name',         meta.fileName],
+            ];
+
+            document.getElementById('standardMeta').innerHTML = rows.map((r, i) => `
+                <div class="flex border-b border-gray-100 ${i%2?'bg-gray-50':'bg-white'}">
+                    <div class="w-1/3 px-6 py-3 font-medium text-gray-700">${r[0]}</div>
+                    <div class="w-2/3 px-6 py-3 text-gray-600 break-all">${r[1]}</div>
+                </div>`).join('');
+        }
+
+        /* ── Custom fields ── */
+        function renderCustomFields(custom) {
+            const section = document.getElementById('customSection');
+            if (!custom || Object.keys(custom).length === 0) { section.classList.add('hidden'); return; }
+            section.classList.remove('hidden');
+
+            const banner = document.getElementById('classificationBanner');
+            if (custom.classification) {
+                const colors = {
+                    'PUBLIC':'bg-green-500','INTERNAL':'bg-blue-500',
+                    'CONFIDENTIAL':'bg-yellow-500','RESTRICTED':'bg-orange-500','TOP SECRET':'bg-red-600'
+                };
+                banner.innerHTML = `<div class="${colors[custom.classification]||'bg-gray-500'} text-white px-4 py-2 text-center font-bold text-sm tracking-wide">${custom.classification}</div>`;
+            } else { banner.innerHTML = ''; }
+
+            let html = '';
+            let idx = 0;
+            for (const [key, value] of Object.entries(custom)) {
+                const isObj = typeof value === 'object' && !Array.isArray(value) && value !== null;
+                html += `
+                    <div class="border-b border-gray-100 ${idx%2?'bg-gray-50':'bg-white'}">
+                        <div class="flex ${isObj?'flex-col':''}">
+                            <div class="${isObj?'px-6 py-2 font-medium text-gray-700 bg-gray-50':'w-1/3 px-6 py-3 font-medium text-gray-700'}">${formatKey(key)}</div>
+                            <div class="${isObj?'px-6 py-3':'w-2/3 px-6 py-3'} text-gray-600 break-all">${renderValue(value, key)}</div>
+                        </div>
+                    </div>`;
+                idx++;
+            }
+            document.getElementById('customMeta').innerHTML = html;
+            document.getElementById('rawJson').textContent = JSON.stringify(custom, null, 2);
+        }
+
+        /* ── PDF embedded text ── */
+        function renderPdfText(pages) {
+            const section = document.getElementById('pdfTextSection');
+            if (!pages || pages.length === 0 || pages.every(p => !p.trim())) {
+                section.classList.add('hidden');
+                return;
+            }
+            section.classList.remove('hidden');
+            const combined = pages.map((t, i) => `── Page ${i+1} ──\n${t || '(empty)'}`).join('\n\n');
+            document.getElementById('pdfTextBody').textContent = combined;
+        }
+
+        /* ── Images ── */
+        function renderImages(images, jobId) {
+            const imgSection = document.getElementById('imagesSection');
+            const noImages   = document.getElementById('noImages');
+
+            if (!images || images.length === 0) {
+                imgSection.classList.add('hidden');
+                noImages.classList.remove('hidden');
+                return;
+            }
+
+            noImages.classList.add('hidden');
+            imgSection.classList.remove('hidden');
+            document.getElementById('imageCount').textContent = `(${images.length} image${images.length>1?'s':''})`;
+
+            const dlBtn = document.getElementById('downloadAllBtn');
+            dlBtn.href = `/api/images/${jobId}/download-all`;
+            dlBtn.classList.remove('hidden');
+
+            const grid = document.getElementById('imageGrid');
+            grid.innerHTML = images.map((img, i) => `
+                <div class="img-thumb group relative bg-gray-100 rounded-lg overflow-hidden border border-gray-200 cursor-pointer"
+                     onclick="openLightbox('${img.url}', '${img.filename}', ${img.width}, ${img.height}, '${formatFileSize(img.size)}')">
+                    <div class="aspect-square flex items-center justify-center p-2">
+                        <img src="${img.url}" alt="${img.filename}"
+                             class="max-h-full max-w-full object-contain rounded"
+                             loading="lazy" />
+                    </div>
+                    <div class="px-3 py-2 bg-white border-t border-gray-100">
+                        <p class="text-xs font-medium text-gray-700 truncate">${img.filename}</p>
+                        <p class="text-xs text-gray-400">Page ${img.page} · ${img.width}×${img.height} · ${formatFileSize(img.size)}</p>
+                    </div>
+                    <a href="${img.url}" download="${img.filename}"
+                       onclick="event.stopPropagation()"
+                       class="absolute top-2 right-2 bg-white/90 rounded-full p-1.5 shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                       title="Download image">
+                        <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 18h16"/>
+                        </svg>
+                    </a>
+                </div>
+            `).join('');
+        }
+
+        /* ════════════════════════════════════════ */
+        /*  OCR BENCHMARK                          */
+        /* ════════════════════════════════════════ */
+
+        async function runOcrBenchmark() {
+            if (!currentJobId) { showError('No PDF extracted yet.'); return; }
+
+            const btn = document.getElementById('runOcrBtn');
+            const loading = document.getElementById('ocrLoading');
+            const ocrResults = document.getElementById('ocrResults');
+
+            btn.disabled = true;
+            loading.classList.remove('hidden');
+            ocrResults.classList.add('hidden');
+
+            try {
+                const resp = await fetch(`/api/ocr/${currentJobId}`, { method: 'POST' });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || `HTTP ${resp.status}`);
+                }
+                const data = await resp.json();
+                renderOcrResults(data);
+            } catch (err) {
+                showError('OCR benchmark failed: ' + err.message);
+            } finally {
+                loading.classList.add('hidden');
+                btn.disabled = false;
+            }
+        }
+
+        function renderOcrResults(data) {
+            const ocrResults = document.getElementById('ocrResults');
+            ocrResults.classList.remove('hidden');
+
+            const s = data.summary;
+            const lambdaMs = s.lambdaTotalMs;
+            const directMs = s.directOcrTotalMs;
+            const maxMs = Math.max(lambdaMs, directMs, 1);
+
+            const lambdaWins = lambdaMs < directMs;
+            const borderColor = lambdaWins ? 'border-orange-400' : 'border-blue-400';
+            const bgColor = lambdaWins ? 'bg-orange-50' : 'bg-blue-50';
+
+            // Summary card
+            document.getElementById('ocrSummary').className = `m-6 rounded-xl border-2 p-6 ${borderColor} ${bgColor}`;
+            document.getElementById('ocrSummary').innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-gray-800">⚡ Benchmark Results</h3>
+                    <span class="text-xs px-3 py-1 rounded-full font-semibold ${lambdaWins ? 'bg-orange-200 text-orange-800' : 'bg-blue-200 text-blue-800'}">
+                        ${lambdaWins ? 'Lambda' : 'Direct Tesseract'} wins by ${formatMs(s.differenceMs)}
+                    </span>
+                </div>
+                <div class="grid grid-cols-2 gap-6">
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="w-3 h-3 bg-orange-500 rounded-full"></span>
+                            <span class="text-sm font-semibold text-gray-700">Lambda Per-Image</span>
+                        </div>
+                        <div class="text-2xl font-bold text-orange-600">${formatMs(lambdaMs)}</div>
+                        <div class="text-xs text-gray-500 mt-1">${s.lambdaImageCount} image${s.lambdaImageCount !== 1 ? 's' : ''} processed</div>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="w-3 h-3 bg-blue-500 rounded-full"></span>
+                            <span class="text-sm font-semibold text-gray-700">Direct Tesseract</span>
+                        </div>
+                        <div class="text-2xl font-bold text-blue-600">${formatMs(directMs)}</div>
+                        <div class="text-xs text-gray-500 mt-1">${s.directPageCount} page${s.directPageCount !== 1 ? 's' : ''} processed</div>
+                    </div>
+                </div>
+            `;
+
+            // Timing bar chart
+            document.getElementById('ocrTimingChart').innerHTML = `
+                <div class="space-y-3 mb-2">
+                    <div>
+                        <div class="flex items-center justify-between text-xs text-gray-600 mb-1">
+                            <span class="flex items-center gap-1.5"><span class="w-2 h-2 bg-orange-500 rounded-full"></span>Lambda (total)</span>
+                            <span class="font-mono">${formatMs(lambdaMs)}</span>
+                        </div>
+                        <div class="h-6 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="timing-bar h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full" style="width:${(lambdaMs/maxMs*100).toFixed(1)}%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex items-center justify-between text-xs text-gray-600 mb-1">
+                            <span class="flex items-center gap-1.5"><span class="w-2 h-2 bg-blue-500 rounded-full"></span>Direct Tesseract (total)</span>
+                            <span class="font-mono">${formatMs(directMs)}</span>
+                        </div>
+                        <div class="h-6 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="timing-bar h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full" style="width:${(directMs/maxMs*100).toFixed(1)}%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Per-item timing breakdown -->
+                <details class="mt-4">
+                    <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Show per-item timing breakdown</summary>
+                    <div class="mt-3 space-y-2">
+                        ${(data.lambdaPerImage.images || []).map(img => `
+                            <div>
+                                <div class="flex justify-between text-xs text-gray-500 mb-0.5">
+                                    <span class="truncate max-w-[60%]">λ ${img.image_name}</span>
+                                    <span class="font-mono">${formatMs(img.roundtrip_ms)} <span class="text-gray-400">(internal ${formatMs(img.lambda_internal_ms)})</span></span>
+                                </div>
+                                <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full bg-orange-300 rounded-full" style="width:${(img.roundtrip_ms/maxMs*100).toFixed(1)}%"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${(data.directOcr.pages || []).map(pg => `
+                            <div>
+                                <div class="flex justify-between text-xs text-gray-500 mb-0.5">
+                                    <span>📄 Page ${pg.page}</span>
+                                    <span class="font-mono">${formatMs(pg.elapsed_ms)}</span>
+                                </div>
+                                <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full bg-blue-300 rounded-full" style="width:${(pg.elapsed_ms/maxMs*100).toFixed(1)}%"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </details>
+            `;
+
+            // Lambda details
+            const lambdaDetails = document.getElementById('lambdaDetails');
+            const lambdaImgs = data.lambdaPerImage.images || [];
+            document.getElementById('lambdaCount').textContent = `(${lambdaImgs.length} images · ${formatMs(data.lambdaPerImage.totalMs)} total)`;
+
+            if (lambdaImgs.length === 0) {
+                lambdaDetails.innerHTML = '<p class="text-sm text-gray-500">No images to process.</p>';
+            } else {
+                lambdaDetails.innerHTML = lambdaImgs.map(img => `
+                    <div class="border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="flex items-center justify-between px-4 py-2 bg-orange-50 border-b border-gray-200">
+                            <span class="text-sm font-medium text-gray-700">${img.image_name}</span>
+                            <div class="flex items-center gap-3 text-xs">
+                                <span class="text-orange-600 font-mono">roundtrip: ${formatMs(img.roundtrip_ms)}</span>
+                                <span class="text-gray-500 font-mono">lambda: ${formatMs(img.lambda_internal_ms)}</span>
+                            </div>
+                        </div>
+                        <pre class="p-3 text-xs text-gray-600 bg-gray-50 max-h-40 overflow-auto whitespace-pre-wrap">${escapeHtml(img.text || '(no text extracted)')}</pre>
+                        ${img.error ? `<div class="px-3 py-1 bg-red-50 text-red-600 text-xs">Error: ${escapeHtml(img.error)}</div>` : ''}
+                    </div>
+                `).join('');
+            }
+
+            // Direct Tesseract details
+            const directDetails = document.getElementById('directDetails');
+            const directPages = data.directOcr.pages || [];
+            document.getElementById('directCount').textContent = `(${directPages.length} pages · ${formatMs(data.directOcr.totalMs)} total)`;
+
+            directDetails.innerHTML = directPages.map(pg => `
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    <div class="flex items-center justify-between px-4 py-2 bg-blue-50 border-b border-gray-200">
+                        <span class="text-sm font-medium text-gray-700">Page ${pg.page}</span>
+                        <span class="text-blue-600 text-xs font-mono">${formatMs(pg.elapsed_ms)}</span>
+                    </div>
+                    <pre class="p-3 text-xs text-gray-600 bg-gray-50 max-h-40 overflow-auto whitespace-pre-wrap">${escapeHtml(pg.text || '(no text extracted)')}</pre>
+                    ${pg.error ? `<div class="px-3 py-1 bg-red-50 text-red-600 text-xs">Error: ${escapeHtml(pg.error)}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        /* ── Lightbox ── */
+        function openLightbox(url, name, w, h, size) {
+            const lb = document.getElementById('lightbox');
+            document.getElementById('lightboxImg').src = url;
+            document.getElementById('lightboxCaption').textContent = `${name}  —  ${w}×${h}  —  ${size}`;
+            lb.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeLightbox(e) {
+            if (e && e.target.tagName === 'IMG') return;
+            document.getElementById('lightbox').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+        /* ── Helpers ── */
+        function renderValue(value, key = '') {
+            if (value === null || value === undefined) return '<span class="text-gray-400">N/A</span>';
+            if (typeof value === 'boolean')
+                return value ? '<span class="text-green-600 font-medium">✓ Yes</span>'
+                             : '<span class="text-red-600 font-medium">✗ No</span>';
+            if (Array.isArray(value)) {
+                if (!value.length) return '<span class="text-gray-400">Empty</span>';
+                return `<div class="flex flex-wrap gap-1">${value.map(v =>
+                    `<span class="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-xs">${v}</span>`).join('')}</div>`;
+            }
+            if (typeof value === 'object') return renderNestedObject(value);
+            if (key === 'classification') return classificationBadge(value);
+            if (key === 'dataSensitivity') return sensitivityBadge(value);
+            if (key === 'securityLevel') {
+                const c = ['green','blue','yellow','yellow','orange','red'][Math.min(value,5)] || 'gray';
+                return `<span class="inline-flex items-center px-2 py-0.5 rounded text-sm font-medium bg-${c}-100 text-${c}-800">Level ${value}</span>`;
+            }
+            return `<span class="text-gray-700">${value}</span>`;
+        }
+
+        function renderNestedObject(obj, depth = 0) {
+            const entries = Object.entries(obj);
+            if (!entries.length) return '<span class="text-gray-400">Empty</span>';
+            return `<div class="${depth?'pl-3 border-l-2 border-gray-200 ml-1':''}">
+                ${entries.map(([k,v]) => `<div class="py-1">
+                    <span class="text-gray-500 text-sm">${formatKey(k)}:</span>
+                    <span class="ml-2">${renderValue(v, k)}</span>
+                </div>`).join('')}</div>`;
+        }
+
+        function classificationBadge(c) {
+            const m = {'PUBLIC':'bg-green-100 text-green-800 border-green-300','INTERNAL':'bg-blue-100 text-blue-800 border-blue-300',
+                'CONFIDENTIAL':'bg-yellow-100 text-yellow-800 border-yellow-300','RESTRICTED':'bg-orange-100 text-orange-800 border-orange-300',
+                'TOP SECRET':'bg-red-100 text-red-800 border-red-300'};
+            return `<span class="px-3 py-1 rounded-full text-xs font-bold border ${m[c]||'bg-gray-100 text-gray-800 border-gray-300'}">${c}</span>`;
+        }
+        function sensitivityBadge(s) {
+            const m = {'NONE':'text-green-600','LOW':'text-blue-600','MEDIUM':'text-yellow-600','HIGH':'text-orange-600 font-semibold','CRITICAL':'text-red-600 font-bold'};
+            return `<span class="${m[s]||'text-gray-600'}">${s}</span>`;
+        }
+
+        function formatKey(key) { return key.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()).trim(); }
+        function formatFileSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+        function formatMs(ms) { return ms >= 1000 ? (ms/1000).toFixed(2) + 's' : ms.toFixed(0) + 'ms'; }
+        function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        function toggleRawJson() {
+            const el = document.getElementById('rawJson');
+            const ic = document.getElementById('jsonToggleIcon');
+            el.classList.toggle('hidden');
+            ic.style.transform = el.classList.contains('hidden') ? '' : 'rotate(90deg)';
+        }
+
+        function toggleSection(contentId, toggleId) {
+            const el = document.getElementById(contentId);
+            const ic = document.getElementById(toggleId);
+            el.classList.toggle('hidden');
+            ic.style.transform = el.classList.contains('hidden') ? '' : 'rotate(180deg)';
+        }
+
+        function showError(msg) { errorMessage.textContent = msg; errorDiv.classList.remove('hidden'); }
+    </script>
+</body>
+</html>

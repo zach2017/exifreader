@@ -1,0 +1,12 @@
+samples/
+*.pdf
+*.png
+*.jpg
+__pycache__/
+.git/
+README.md
+create_samples.py
+index.html
+nginx.conf
+docker-compose.yml
+.dockerignore

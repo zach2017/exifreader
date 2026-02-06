@@ -1,0 +1,9 @@
+FROM localstack/localstack:latest
+
+# Install Tesseract OCR so local-executor lambdas can use it
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        zip && \
+    rm -rf /var/lib/apt/lists/*

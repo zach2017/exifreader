@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build: .
+    volumes:
+      - extracted_data:/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - LAMBDA_FUNCTION_NAME=ocr-extract-text
+    depends_on:
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
+  localstack:
+    build:
+      context: .
+      dockerfile: Dockerfile.localstack
+    environment:
+      - SERVICES=lambda
+      - LAMBDA_EXECUTOR=local
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./init-scripts/deploy-lambda.sh:/etc/localstack/init/ready.d/deploy-lambda.sh
+      - ./lambda_ocr:/etc/localstack/init/ready.d/lambda_src
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+      start_period: 15s
+
+volumes:
+  extracted_data:
+  localstack_data:
