@@ -1,74 +1,83 @@
 version: "3.8"
 
-# ─────────────────────────────────────────────────────────
-#  PDF & Image Text Extraction Stack
+# ─────────────────────────────────────────────────────────────
+#  PDF & Image OCR Extraction Stack
+#
+#  LocalStack 3.x+ runs Lambdas in SEPARATE Docker containers
+#  (no more LAMBDA_EXECUTOR=local). We:
+#    1. Build a custom Lambda runtime image with Tesseract/Poppler
+#    2. Tell LocalStack to use it via LAMBDA_RUNTIME_IMAGE_MAPPING
+#    3. Mount Docker socket so LocalStack can spawn Lambda containers
+#    4. Use a deployer that waits for function Active state
 #
 #  Startup order:
-#    1. lambda-builder  → builds the zip (runs once, exits)
-#    2. localstack      → starts with Tesseract pre-installed,
-#                          init script deploys the Lambda
-#    3. backend         → Flask API (waits for LocalStack healthy)
-#    4. frontend        → Nginx + Tailwind CSS
-# ─────────────────────────────────────────────────────────
+#    lambda-image (build only) → localstack → deployer → backend → frontend
+# ─────────────────────────────────────────────────────────────
 
 services:
 
-  # ── Build Lambda zip (runs once then exits) ──
-  lambda-builder:
-    image: python:3.11-slim
-    container_name: ocr-lambda-builder
-    volumes:
-      - ./lambda:/src:ro
-      - lambda-zip:/out
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        set -e
-        echo "══ Building Lambda zip ══"
-        apt-get update -qq && apt-get install -y -qq zip > /dev/null 2>&1
-        mkdir -p /tmp/pkg
-        pip install --quiet --no-cache-dir -t /tmp/pkg \
-            PyPDF2==3.0.1 \
-            pytesseract==0.3.10 \
-            Pillow==10.3.0 \
-            pdf2image==1.17.0
-        cp /src/handler.py /tmp/pkg/
-        cd /tmp/pkg
-        zip -r9 /out/lambda.zip . > /dev/null 2>&1
-        echo "✓ Lambda zip: $$(du -sh /out/lambda.zip | cut -f1)"
+  # ── 1. Build custom Lambda runtime image ──────────────────
+  # Extends public.ecr.aws/lambda/python:3.11 with Tesseract + Poppler.
+  # The 'image:' tag makes it available as 'lambda-ocr-python311' on
+  # the Docker daemon. LocalStack picks it up via LAMBDA_RUNTIME_IMAGE_MAPPING.
+  lambda-image:
+    build: ./lambda-image
+    image: lambda-ocr-python311
+    container_name: ocr-lambda-image-builder
+    entrypoint: ["echo", "Lambda OCR image built successfully"]
+    networks:
+      - ocr-net
 
-  # ── LocalStack with Tesseract + Poppler pre-installed ──
+  # ── 2. LocalStack ─────────────────────────────────────────
   localstack:
-    build: ./localstack-custom
+    image: localstack/localstack:latest
     container_name: ocr-localstack
     ports:
       - "4566:4566"
     environment:
       - SERVICES=lambda,iam,logs
       - DEBUG=1
+      # Map python3.11 runtime to our custom image with Tesseract
+      - LAMBDA_RUNTIME_IMAGE_MAPPING={"python3.11":"lambda-ocr-python311"}
+      # Lambda containers must be on the same Docker network
+      - LAMBDA_DOCKER_NETWORK=ocr-net
+      # Faster startup
       - EAGER_SERVICE_LOADING=1
-      # Use legacy Lambda provider with local executor so the handler
-      # runs inside this container where Tesseract is installed.
-      - PROVIDER_OVERRIDE_LAMBDA=legacy
-      - LAMBDA_EXECUTOR=local
+      # Pre-pull/build images to speed up first invocation
+      - LAMBDA_PREBUILD_IMAGES=1
     volumes:
-      - ./localstack-init:/etc/localstack/init/ready.d:ro
-      - lambda-zip:/opt/lambda-zip:ro
+      # REQUIRED: LocalStack needs Docker socket to spawn Lambda containers
+      - /var/run/docker.sock:/var/run/docker.sock
       - localstack-data:/var/lib/localstack
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 15s
     depends_on:
-      lambda-builder:
+      lambda-image:
         condition: service_completed_successfully
     networks:
       - ocr-net
 
-  # ── Flask Backend ──
+  # ── 3. Deployer: packages zip, creates function, waits for Active ──
+  deployer:
+    build: ./deployer
+    container_name: ocr-deployer
+    volumes:
+      - ./lambda-image/handler.py:/src/handler.py:ro
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      - ocr-net
+
+  # ── 4. Flask Backend ──────────────────────────────────────
   backend:
     build: ./backend
     container_name: ocr-backend
@@ -81,12 +90,12 @@ services:
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - LAMBDA_FUNCTION_NAME=ocr-extract
     depends_on:
-      localstack:
-        condition: service_healthy
+      deployer:
+        condition: service_completed_successfully
     networks:
       - ocr-net
 
-  # ── Nginx Frontend ──
+  # ── 5. Nginx Frontend ────────────────────────────────────
   frontend:
     build: ./frontend
     container_name: ocr-frontend
@@ -99,7 +108,6 @@ services:
 
 volumes:
   localstack-data:
-  lambda-zip:
 
 networks:
   ocr-net:

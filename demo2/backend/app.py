@@ -1,7 +1,5 @@
 """
-Backend API — receives file uploads from the frontend,
-sends them to the LocalStack Lambda function for OCR processing,
-and returns the extracted text + timing info.
+Backend API — upload files → invoke LocalStack Lambda → return extracted text.
 """
 
 import os
@@ -19,174 +17,133 @@ app = Flask(__name__)
 CORS(app)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-# ── AWS / LocalStack Config ──
-LOCALSTACK_ENDPOINT = os.environ.get("LOCALSTACK_ENDPOINT", "http://localhost:4566")
-LAMBDA_FUNCTION     = os.environ.get("LAMBDA_FUNCTION_NAME", "ocr-extract")
-REGION              = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-
-ALLOWED_EXTENSIONS  = {"pdf", "tiff", "tif", "png", "jpg", "jpeg"}
-MAX_FILE_SIZE       = 20 * 1024 * 1024  # 20 MB
+ENDPOINT  = os.environ.get("LOCALSTACK_ENDPOINT", "http://localhost:4566")
+FUNC_NAME = os.environ.get("LAMBDA_FUNCTION_NAME", "ocr-extract")
+REGION    = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+ALLOWED   = {"pdf", "tiff", "tif", "png", "jpg", "jpeg"}
+MAX_SIZE  = 20 * 1024 * 1024
 
 
-def allowed_file(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def _client():
+    return boto3.client("lambda", endpoint_url=ENDPOINT, region_name=REGION,
+                        aws_access_key_id="test", aws_secret_access_key="test")
 
 
-def get_lambda_client():
-    return boto3.client(
-        "lambda",
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        region_name=REGION,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    )
-
-
-def wait_for_lambda(max_retries=30, interval=2):
-    """Block until the Lambda function is available in LocalStack."""
-    client = get_lambda_client()
-    for i in range(max_retries):
+def _wait_active(timeout=120):
+    """Poll until the Lambda is Active (or give up)."""
+    c = _client()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         try:
-            resp = client.get_function(FunctionName=LAMBDA_FUNCTION)
-            state = resp.get("Configuration", {}).get("State", "Unknown")
-            logger.info("Lambda '%s' state: %s", LAMBDA_FUNCTION, state)
+            cfg = c.get_function(FunctionName=FUNC_NAME).get("Configuration", {})
+            state = cfg.get("State", "Unknown")
+            log.info("Lambda state: %s", state)
             if state == "Active":
                 return True
-            # Even if state is not "Active", if we got a response it exists
-            return True
+            if state == "Failed":
+                log.error("Lambda state Failed: %s", cfg.get("StateReasonCode"))
+                return False
         except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code == "ResourceNotFoundException":
-                logger.info("Lambda not found yet, waiting... (%d/%d)", i + 1, max_retries)
-                time.sleep(interval)
+            if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                log.info("Lambda not found yet...")
             else:
-                logger.warning("Unexpected error checking Lambda: %s", e)
-                time.sleep(interval)
+                log.warning("Error checking Lambda: %s", e)
         except Exception as e:
-            logger.warning("Connection error (LocalStack may still be starting): %s", e)
-            time.sleep(interval)
+            log.warning("Connection error: %s", e)
+        time.sleep(3)
     return False
 
 
-# ── Wait for Lambda on startup ──
 with app.app_context():
-    logger.info("Waiting for Lambda function '%s' to be available...", LAMBDA_FUNCTION)
-    if wait_for_lambda():
-        logger.info("✓ Lambda function '%s' is ready!", LAMBDA_FUNCTION)
+    log.info("Waiting for Lambda '%s' to become Active...", FUNC_NAME)
+    if _wait_active():
+        log.info("✓ Lambda '%s' is Active!", FUNC_NAME)
     else:
-        logger.error("✗ Lambda function '%s' not found after retries. Invocations will fail.", LAMBDA_FUNCTION)
+        log.error("✗ Lambda '%s' not Active after timeout — invocations may fail", FUNC_NAME)
 
 
 @app.route("/api/extract", methods=["POST"])
 def extract_text():
-    """Accept a file upload, invoke the Lambda, return extracted text."""
-
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
-
-    file = request.files["file"]
-    if file.filename == "":
+    f = request.files["file"]
+    if not f.filename:
         return jsonify({"error": "Empty filename"}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED:
+        return jsonify({"error": f"Unsupported type. Allowed: {', '.join(sorted(ALLOWED))}"}), 400
 
-    if not allowed_file(file.filename):
-        return jsonify({"error": f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"}), 400
-
-    file_bytes = file.read()
-    if len(file_bytes) > MAX_FILE_SIZE:
+    data = f.read()
+    if len(data) > MAX_SIZE:
         return jsonify({"error": "File exceeds 20 MB limit"}), 413
 
-    # Build Lambda payload
-    encoded = base64.b64encode(file_bytes).decode("utf-8")
-    extension = file.filename.rsplit(".", 1)[1].lower()
     payload = json.dumps({
-        "file_data": encoded,
-        "file_name": file.filename,
-        "file_type": extension,
+        "file_data": base64.b64encode(data).decode(),
+        "file_name": f.filename,
+        "file_type": ext,
     })
 
-    logger.info("Invoking Lambda '%s' for file '%s' (%d bytes)",
-                LAMBDA_FUNCTION, file.filename, len(file_bytes))
-
+    log.info("Invoking '%s' for '%s' (%d bytes)", FUNC_NAME, f.filename, len(data))
     t0 = time.perf_counter()
-    try:
-        client = get_lambda_client()
 
-        # Verify function exists before invoking
+    try:
+        c = _client()
+
+        # Pre-check: does the function exist and is it Active?
         try:
-            client.get_function(FunctionName=LAMBDA_FUNCTION)
+            cfg = c.get_function(FunctionName=FUNC_NAME).get("Configuration", {})
+            state = cfg.get("State", "Unknown")
+            if state != "Active":
+                return jsonify({"error": f"Lambda state is '{state}', not Active. Wait for deployment to finish."}), 503
         except ClientError as e:
             if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                # Try listing to help debug
-                funcs = client.list_functions()
-                names = [f["FunctionName"] for f in funcs.get("Functions", [])]
-                logger.error("Lambda '%s' not found. Available functions: %s", LAMBDA_FUNCTION, names)
-                return jsonify({
-                    "error": f"Lambda function '{LAMBDA_FUNCTION}' not found in LocalStack. "
-                             f"Available: {names}. Check LocalStack logs."
-                }), 503
+                funcs = [fn["FunctionName"] for fn in c.list_functions().get("Functions", [])]
+                return jsonify({"error": f"Lambda '{FUNC_NAME}' not found. Available: {funcs}"}), 503
             raise
 
-        response = client.invoke(
-            FunctionName=LAMBDA_FUNCTION,
-            InvocationType="RequestResponse",
-            Payload=payload,
-        )
+        resp = c.invoke(FunctionName=FUNC_NAME, InvocationType="RequestResponse", Payload=payload)
+        raw = resp["Payload"].read().decode()
+        elapsed = round((time.perf_counter() - t0) * 1000)
 
-        raw_payload = response["Payload"].read().decode("utf-8")
-        elapsed_ms = round((time.perf_counter() - t0) * 1000)
+        if "FunctionError" in resp:
+            log.error("Lambda error: %s", raw)
+            return jsonify({"error": f"Lambda error: {raw[:500]}"}), 502
 
-        logger.info("Lambda returned in %d ms (status %s)",
-                     elapsed_ms, response.get("StatusCode"))
+        result = json.loads(raw)
+        body = json.loads(result["body"]) if isinstance(result.get("body"), str) else result.get("body", result)
 
-        # Check for Lambda-level errors
-        if "FunctionError" in response:
-            logger.error("Lambda FunctionError: %s", raw_payload)
-            return jsonify({"error": f"Lambda execution error: {raw_payload}"}), 502
-
-        result_payload = json.loads(raw_payload)
-
-        # Lambda returns {"statusCode": 200, "body": "{...}"}
-        if "body" in result_payload:
-            body = json.loads(result_payload["body"]) if isinstance(result_payload["body"], str) else result_payload["body"]
-        else:
-            body = result_payload
-
-        # Check for application-level errors from the handler
-        if result_payload.get("statusCode", 200) >= 400:
+        if result.get("statusCode", 200) >= 400:
             return jsonify({"error": body.get("error", "Extraction failed")}), 502
 
         return jsonify({
             "text": body.get("text", ""),
-            "pages": body.get("pages", None),
-            "processing_time_ms": body.get("processing_time_ms", elapsed_ms),
+            "pages": body.get("pages"),
+            "processing_time_ms": body.get("processing_time_ms", elapsed),
         })
 
-    except ClientError as exc:
-        logger.exception("AWS ClientError during Lambda invocation")
-        return jsonify({"error": f"AWS error: {exc.response['Error']['Message']}"}), 502
-    except Exception as exc:
-        logger.exception("Lambda invocation failed")
-        return jsonify({"error": str(exc)}), 502
+    except ClientError as e:
+        log.exception("AWS error")
+        return jsonify({"error": f"AWS: {e.response['Error']['Message']}"}), 502
+    except Exception as e:
+        log.exception("Invocation failed")
+        return jsonify({"error": str(e)}), 502
 
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    """Health check — also reports whether Lambda is reachable."""
     try:
-        client = get_lambda_client()
-        client.get_function(FunctionName=LAMBDA_FUNCTION)
-        lambda_ok = True
-    except Exception:
-        lambda_ok = False
-
-    return jsonify({
-        "status": "ok",
-        "lambda_ready": lambda_ok,
-        "lambda_function": LAMBDA_FUNCTION,
-        "localstack_endpoint": LOCALSTACK_ENDPOINT,
-    })
+        c = _client()
+        cfg = c.get_function(FunctionName=FUNC_NAME).get("Configuration", {})
+        return jsonify({
+            "status": "ok",
+            "lambda_state": cfg.get("State"),
+            "lambda_function": FUNC_NAME,
+            "endpoint": ENDPOINT,
+        })
+    except Exception as e:
+        return jsonify({"status": "ok", "lambda_state": "not_found", "error": str(e)})
 
 
 if __name__ == "__main__":

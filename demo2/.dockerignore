@@ -1,6 +1,5 @@
 __pycache__
 *.pyc
 .git
-.env.local
-node_modules
 *.zip
+.env.local

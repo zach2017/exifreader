@@ -1,258 +1,159 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>OCR Extract · PDF &amp; Image Text Extraction</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet"/>
   <script>
     tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            display: ['Outfit', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
-          colors: {
-            ink:    { 50: '#f5f5f0', 100: '#e8e8df', 200: '#d1d1bf', 800: '#2a2a24', 900: '#1a1a16', 950: '#0d0d0b' },
-            ember:  { 400: '#f97316', 500: '#ea580c', 600: '#c2410c' },
-            jade:   { 400: '#34d399', 500: '#10b981' },
-          },
+      theme: { extend: {
+        fontFamily: { display:['Outfit','sans-serif'], mono:['JetBrains Mono','monospace'] },
+        colors: {
+          ink:{ 50:'#f5f5f0',100:'#e8e8df',200:'#d1d1bf',800:'#2a2a24',900:'#1a1a16',950:'#0d0d0b' },
+          ember:{ 400:'#f97316',500:'#ea580c',600:'#c2410c' },
+          jade:{ 400:'#34d399',500:'#10b981' },
         },
-      },
+      }},
     };
   </script>
   <style>
-    body { font-family: 'Outfit', sans-serif; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-
-    /* drop-zone pulse */
-    .drop-active { animation: pulse-border 1s ease-in-out infinite; }
-    @keyframes pulse-border {
-      0%, 100% { border-color: #ea580c; box-shadow: 0 0 0 0 rgba(234,88,12,.3); }
-      50%       { border-color: #f97316; box-shadow: 0 0 0 12px rgba(234,88,12,0); }
-    }
-
-    /* slide-up reveal */
-    .reveal { animation: slideUp .5s cubic-bezier(.22,1,.36,1) forwards; opacity: 0; }
-    @keyframes slideUp { to { opacity: 1; transform: translateY(0); } }
-    .reveal { transform: translateY(24px); }
-
-    /* spinner */
-    .spinner { border: 3px solid rgba(255,255,255,.15); border-top-color: #f97316; border-radius: 50%; width: 28px; height: 28px; animation: spin .7s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* scrollbar */
-    #result-text::-webkit-scrollbar { width: 6px; }
-    #result-text::-webkit-scrollbar-thumb { background: #3a3a34; border-radius: 3px; }
-
-    /* noise texture overlay */
-    .noise::before {
-      content: ''; position: absolute; inset: 0; opacity: .035; pointer-events: none;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    }
+    body{font-family:'Outfit',sans-serif}
+    .mono{font-family:'JetBrains Mono',monospace}
+    .drop-active{animation:pulse .9s ease-in-out infinite}
+    @keyframes pulse{0%,100%{border-color:#ea580c;box-shadow:0 0 0 0 rgba(234,88,12,.3)}50%{border-color:#f97316;box-shadow:0 0 0 12px rgba(234,88,12,0)}}
+    .reveal{animation:up .5s cubic-bezier(.22,1,.36,1) forwards;opacity:0;transform:translateY(24px)}
+    @keyframes up{to{opacity:1;transform:translateY(0)}}
+    .spinner{border:3px solid rgba(255,255,255,.15);border-top-color:#f97316;border-radius:50%;width:28px;height:28px;animation:spin .7s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    #result-text::-webkit-scrollbar{width:6px}
+    #result-text::-webkit-scrollbar-thumb{background:#3a3a34;border-radius:3px}
   </style>
 </head>
+<body class="h-full bg-ink-950 text-ink-100 overflow-x-hidden">
 
-<body class="h-full bg-ink-950 text-ink-100 noise relative overflow-x-hidden">
-
-  <!-- ───── Top Bar ───── -->
-  <header class="sticky top-0 z-40 backdrop-blur-md bg-ink-950/70 border-b border-ink-800/60">
-    <div class="max-w-5xl mx-auto flex items-center justify-between px-6 py-4">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-ember-400 to-ember-600 flex items-center justify-center text-white font-bold text-sm">O</div>
-        <span class="text-lg font-display font-bold tracking-tight text-ink-50">OCR<span class="text-ember-400">Extract</span></span>
-      </div>
-      <span class="mono text-[11px] text-ink-200/50 hidden sm:block">LocalStack · Lambda · Tesseract</span>
+<header class="sticky top-0 z-40 backdrop-blur-md bg-ink-950/70 border-b border-ink-800/60">
+  <div class="max-w-5xl mx-auto flex items-center justify-between px-6 py-4">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-ember-400 to-ember-600 flex items-center justify-center text-white font-bold text-sm">O</div>
+      <span class="text-lg font-display font-bold tracking-tight text-ink-50">OCR<span class="text-ember-400">Extract</span></span>
     </div>
-  </header>
+    <span class="mono text-[11px] text-ink-200/50 hidden sm:block">LocalStack · Lambda · Tesseract</span>
+  </div>
+</header>
 
-  <!-- ───── Hero ───── -->
-  <main class="max-w-5xl mx-auto px-6 pt-16 pb-24">
-    <section class="text-center mb-16 reveal" style="animation-delay:.1s">
-      <h1 class="text-4xl sm:text-5xl font-display font-bold leading-tight text-ink-50 mb-4">
-        Extract text from<br/><span class="text-transparent bg-clip-text bg-gradient-to-r from-ember-400 to-amber-300">PDFs &amp; Images</span>
-      </h1>
-      <p class="text-ink-200/70 max-w-lg mx-auto text-lg font-light">
-        Upload a PDF or TIFF image. A serverless Lambda function powered by Tesseract OCR will extract every word and return it in seconds.
-      </p>
-    </section>
+<main class="max-w-5xl mx-auto px-6 pt-16 pb-24">
 
-    <!-- ───── Upload Card ───── -->
-    <section class="max-w-2xl mx-auto reveal" style="animation-delay:.25s">
-      <form id="upload-form" enctype="multipart/form-data"
-            class="rounded-2xl border border-ink-800/70 bg-ink-900/60 backdrop-blur-sm shadow-2xl overflow-hidden">
+  <section class="text-center mb-16 reveal" style="animation-delay:.1s">
+    <h1 class="text-4xl sm:text-5xl font-display font-bold leading-tight text-ink-50 mb-4">
+      Extract text from<br><span class="text-transparent bg-clip-text bg-gradient-to-r from-ember-400 to-amber-300">PDFs &amp; Images</span>
+    </h1>
+    <p class="text-ink-200/70 max-w-lg mx-auto text-lg font-light">
+      Upload a PDF or TIFF/PNG/JPG image. A serverless Lambda function powered by Tesseract OCR extracts every word and returns it in seconds.
+    </p>
+  </section>
 
-        <!-- Drop Zone -->
-        <div id="drop-zone"
-             class="relative flex flex-col items-center justify-center gap-4 p-12 border-b border-dashed border-ink-800/60 cursor-pointer transition-colors hover:bg-ink-800/20">
-          <input type="file" id="file-input" name="file" accept=".pdf,.tiff,.tif,.png,.jpg,.jpeg" class="hidden" />
+  <section class="max-w-2xl mx-auto reveal" style="animation-delay:.25s">
+    <form id="form" enctype="multipart/form-data"
+          class="rounded-2xl border border-ink-800/70 bg-ink-900/60 backdrop-blur-sm shadow-2xl overflow-hidden">
 
-          <!-- icon -->
-          <svg id="upload-icon" class="w-14 h-14 text-ink-200/30 transition-colors" fill="none" stroke="currentColor" stroke-width="1.4" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L8 8m4-4 4 4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1"/>
-          </svg>
-
-          <p id="drop-label" class="text-ink-200/60 text-center text-sm">
-            <span class="text-ember-400 font-semibold">Click to browse</span> or drag &amp; drop<br/>
-            <span class="text-xs text-ink-200/40">PDF · TIFF · PNG · JPG — max 20 MB</span>
-          </p>
-
-          <!-- file-chosen pill -->
-          <div id="file-pill" class="hidden items-center gap-2 px-4 py-2 rounded-full bg-ink-800/80 border border-ink-800 text-sm">
-            <svg class="w-4 h-4 text-jade-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-            <span id="file-name" class="text-ink-100 truncate max-w-[220px]"></span>
-            <button type="button" id="clear-file" class="ml-1 text-ink-200/40 hover:text-red-400 transition-colors">&times;</button>
-          </div>
+      <div id="drop" class="relative flex flex-col items-center justify-center gap-4 p-12 border-b border-dashed border-ink-800/60 cursor-pointer transition-colors hover:bg-ink-800/20">
+        <input type="file" id="finput" accept=".pdf,.tiff,.tif,.png,.jpg,.jpeg" class="hidden"/>
+        <svg id="uicon" class="w-14 h-14 text-ink-200/30" fill="none" stroke="currentColor" stroke-width="1.4" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L8 8m4-4 4 4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1"/>
+        </svg>
+        <p id="dlabel" class="text-ink-200/60 text-center text-sm">
+          <span class="text-ember-400 font-semibold">Click to browse</span> or drag &amp; drop<br>
+          <span class="text-xs text-ink-200/40">PDF · TIFF · PNG · JPG — max 20 MB</span>
+        </p>
+        <div id="pill" class="hidden items-center gap-2 px-4 py-2 rounded-full bg-ink-800/80 border border-ink-800 text-sm">
+          <svg class="w-4 h-4 text-jade-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          <span id="fname" class="text-ink-100 truncate max-w-[220px]"></span>
+          <button type="button" id="clr" class="ml-1 text-ink-200/40 hover:text-red-400">&times;</button>
         </div>
-
-        <!-- Submit -->
-        <div class="flex items-center justify-between px-6 py-4 bg-ink-900/80">
-          <p id="status-text" class="text-xs text-ink-200/40 mono">Ready</p>
-          <button type="submit" id="submit-btn" disabled
-                  class="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-ember-500 to-ember-600 text-white font-semibold text-sm shadow-lg shadow-ember-500/20 disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition-all">
-            <span id="btn-label">Extract Text</span>
-            <div id="btn-spinner" class="spinner hidden"></div>
-          </button>
-        </div>
-      </form>
-    </section>
-
-    <!-- ───── Results Panel ───── -->
-    <section id="results" class="max-w-2xl mx-auto mt-10 hidden reveal" style="animation-delay:.1s">
-      <div class="rounded-2xl border border-ink-800/70 bg-ink-900/60 backdrop-blur-sm shadow-2xl overflow-hidden">
-
-        <!-- stats bar -->
-        <div class="flex flex-wrap items-center gap-6 px-6 py-4 border-b border-ink-800/50 text-xs mono">
-          <div class="flex items-center gap-2">
-            <span class="text-ink-200/50">TIME</span>
-            <span id="stat-time" class="text-ember-400 font-semibold">—</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-ink-200/50">CHARS</span>
-            <span id="stat-chars" class="text-jade-400 font-semibold">—</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-ink-200/50">PAGES</span>
-            <span id="stat-pages" class="text-amber-300 font-semibold">—</span>
-          </div>
-          <button id="copy-btn" class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-ink-800 hover:border-ember-500/50 text-ink-200/60 hover:text-ember-400 transition-colors">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            Copy
-          </button>
-        </div>
-
-        <!-- extracted text -->
-        <pre id="result-text" class="px-6 py-5 text-sm leading-relaxed text-ink-100/80 whitespace-pre-wrap max-h-[420px] overflow-y-auto"></pre>
       </div>
-    </section>
-  </main>
 
-  <script>
-    const dropZone   = document.getElementById('drop-zone');
-    const fileInput   = document.getElementById('file-input');
-    const filePill    = document.getElementById('file-pill');
-    const fileName    = document.getElementById('file-name');
-    const clearBtn    = document.getElementById('clear-file');
-    const form        = document.getElementById('upload-form');
-    const submitBtn   = document.getElementById('submit-btn');
-    const btnLabel    = document.getElementById('btn-label');
-    const btnSpinner  = document.getElementById('btn-spinner');
-    const statusText  = document.getElementById('status-text');
-    const results     = document.getElementById('results');
-    const resultText  = document.getElementById('result-text');
-    const statTime    = document.getElementById('stat-time');
-    const statChars   = document.getElementById('stat-chars');
-    const statPages   = document.getElementById('stat-pages');
-    const copyBtn     = document.getElementById('copy-btn');
-    const uploadIcon  = document.getElementById('upload-icon');
-    const dropLabel   = document.getElementById('drop-label');
+      <div class="flex items-center justify-between px-6 py-4 bg-ink-900/80">
+        <p id="status" class="text-xs text-ink-200/40 mono">Ready</p>
+        <button type="submit" id="sbtn" disabled
+                class="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-ember-500 to-ember-600 text-white font-semibold text-sm shadow-lg shadow-ember-500/20 disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition-all">
+          <span id="blabel">Extract Text</span>
+          <div id="bspin" class="spinner hidden"></div>
+        </button>
+      </div>
+    </form>
+  </section>
 
-    // ── Backend URL (routed via Nginx reverse proxy) ──
-    const API = '/api/extract';
+  <section id="results" class="max-w-2xl mx-auto mt-10 hidden reveal" style="animation-delay:.1s">
+    <div class="rounded-2xl border border-ink-800/70 bg-ink-900/60 backdrop-blur-sm shadow-2xl overflow-hidden">
+      <div class="flex flex-wrap items-center gap-6 px-6 py-4 border-b border-ink-800/50 text-xs mono">
+        <div class="flex items-center gap-2"><span class="text-ink-200/50">TIME</span><span id="st" class="text-ember-400 font-semibold">—</span></div>
+        <div class="flex items-center gap-2"><span class="text-ink-200/50">CHARS</span><span id="sc" class="text-jade-400 font-semibold">—</span></div>
+        <div class="flex items-center gap-2"><span class="text-ink-200/50">PAGES</span><span id="sp" class="text-amber-300 font-semibold">—</span></div>
+        <button id="cpbtn" class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-ink-800 hover:border-ember-500/50 text-ink-200/60 hover:text-ember-400 transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>Copy
+        </button>
+      </div>
+      <pre id="rtxt" class="px-6 py-5 text-sm leading-relaxed text-ink-100/80 whitespace-pre-wrap max-h-[420px] overflow-y-auto"></pre>
+    </div>
+  </section>
+</main>
 
-    // ── Drag & Drop ──
-    ['dragenter','dragover'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.add('drop-active'); }));
-    ['dragleave','drop'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.remove('drop-active'); }));
-    dropZone.addEventListener('drop', ev => { fileInput.files = ev.dataTransfer.files; handleFile(); });
-    dropZone.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', handleFile);
+<script>
+const $=id=>document.getElementById(id);
+const drop=$('drop'),fi=$('finput'),pill=$('pill'),fn=$('fname'),
+      form=$('form'),sbtn=$('sbtn'),bl=$('blabel'),bs=$('bspin'),
+      st=$('status'),res=$('results'),rtxt=$('rtxt'),
+      stt=$('st'),stc=$('sc'),stp=$('sp'),cpb=$('cpbtn'),
+      ui=$('uicon'),dl=$('dlabel');
 
-    function handleFile() {
-      const f = fileInput.files[0];
-      if (!f) return resetFile();
-      fileName.textContent = f.name;
-      filePill.classList.remove('hidden');
-      filePill.classList.add('flex');
-      uploadIcon.classList.add('hidden');
-      dropLabel.classList.add('hidden');
-      submitBtn.disabled = false;
-      statusText.textContent = `${(f.size / 1024 / 1024).toFixed(2)} MB selected`;
-    }
+const API='/api/extract';
 
-    function resetFile() {
-      fileInput.value = '';
-      filePill.classList.add('hidden');
-      filePill.classList.remove('flex');
-      uploadIcon.classList.remove('hidden');
-      dropLabel.classList.remove('hidden');
-      submitBtn.disabled = true;
-      statusText.textContent = 'Ready';
-    }
-    clearBtn.addEventListener('click', e => { e.stopPropagation(); resetFile(); });
+['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('drop-active')}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drop-active')}));
+drop.addEventListener('drop',ev=>{fi.files=ev.dataTransfer.files;pick()});
+drop.addEventListener('click',()=>fi.click());
+fi.addEventListener('change',pick);
+$('clr').addEventListener('click',e=>{e.stopPropagation();reset()});
 
-    // ── Submit ──
-    form.addEventListener('submit', async e => {
-      e.preventDefault();
-      const file = fileInput.files[0];
-      if (!file) return;
+function pick(){
+  const f=fi.files[0]; if(!f)return reset();
+  fn.textContent=f.name; pill.classList.remove('hidden'); pill.classList.add('flex');
+  ui.classList.add('hidden'); dl.classList.add('hidden');
+  sbtn.disabled=false; st.textContent=`${(f.size/1048576).toFixed(2)} MB selected`;
+}
+function reset(){
+  fi.value=''; pill.classList.add('hidden'); pill.classList.remove('flex');
+  ui.classList.remove('hidden'); dl.classList.remove('hidden');
+  sbtn.disabled=true; st.textContent='Ready';
+}
 
-      // UI lock
-      submitBtn.disabled = true;
-      btnLabel.textContent = 'Processing…';
-      btnSpinner.classList.remove('hidden');
-      statusText.textContent = 'Uploading to Lambda…';
-      results.classList.add('hidden');
+form.addEventListener('submit',async e=>{
+  e.preventDefault(); const f=fi.files[0]; if(!f)return;
+  sbtn.disabled=true; bl.textContent='Processing…'; bs.classList.remove('hidden');
+  st.textContent='Uploading to Lambda…'; res.classList.add('hidden');
 
-      const fd = new FormData();
-      fd.append('file', file);
+  const fd=new FormData(); fd.append('file',f);
+  const t0=performance.now();
+  try{
+    const r=await fetch(API,{method:'POST',body:fd});
+    const d=await r.json(); const ms=(performance.now()-t0).toFixed(0);
+    if(!r.ok) throw new Error(d.error||'Extraction failed');
+    rtxt.textContent=d.text||'(no text found)';
+    stt.textContent=`${d.processing_time_ms??ms} ms`;
+    stc.textContent=(d.text?.length??0).toLocaleString();
+    stp.textContent=d.pages??'—';
+    res.classList.remove('hidden'); st.textContent='Done ✓';
+  }catch(err){ st.textContent=`Error: ${err.message}`; console.error(err); }
+  finally{ sbtn.disabled=false; bl.textContent='Extract Text'; bs.classList.add('hidden'); }
+});
 
-      const t0 = performance.now();
-      try {
-        const res = await fetch(API, { method: 'POST', body: fd });
-        const data = await res.json();
-        const clientMs = (performance.now() - t0).toFixed(0);
-
-        if (!res.ok) throw new Error(data.error || 'Extraction failed');
-
-        // populate results
-        resultText.textContent = data.text || '(no text found)';
-        statTime.textContent   = `${data.processing_time_ms ?? clientMs} ms`;
-        statChars.textContent  = (data.text?.length ?? 0).toLocaleString();
-        statPages.textContent  = data.pages ?? '—';
-        results.classList.remove('hidden');
-        statusText.textContent = 'Done ✓';
-      } catch (err) {
-        statusText.textContent = `Error: ${err.message}`;
-        console.error(err);
-      } finally {
-        submitBtn.disabled = false;
-        btnLabel.textContent = 'Extract Text';
-        btnSpinner.classList.add('hidden');
-      }
-    });
-
-    // ── Copy ──
-    copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(resultText.textContent).then(() => {
-        copyBtn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Copied!`;
-        setTimeout(() => {
-          copyBtn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
-        }, 2000);
-      });
-    });
-  </script>
+cpb.addEventListener('click',()=>{
+  navigator.clipboard.writeText(rtxt.textContent).then(()=>{
+    cpb.textContent='Copied!'; setTimeout(()=>cpb.textContent='Copy',2000);
+  });
+});
+</script>
 </body>
 </html>
