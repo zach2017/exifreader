@@ -38,8 +38,6 @@ def _wait_active(timeout=180):
         except ClientError as e:
             if e.response["Error"]["Code"] == "ResourceNotFoundException":
                 log.info("Lambda '%s' not found yet...", FUNC_NAME)
-            else:
-                log.warning("Error: %s", e)
         except Exception as e:
             log.warning("Connection error: %s", e)
         time.sleep(5)
@@ -50,8 +48,7 @@ with app.app_context():
     if _wait_active():
         log.info("✓ Lambda '%s' Active!", FUNC_NAME)
     else:
-        log.error("✗ Lambda '%s' not Active — invocations may fail", FUNC_NAME)
-
+        log.error("✗ Lambda '%s' not Active", FUNC_NAME)
 
 @app.route("/api/extract", methods=["POST"])
 def extract_text():
@@ -62,7 +59,7 @@ def extract_text():
         return jsonify({"error": "Empty filename"}), 400
     ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
     if ext not in ALLOWED:
-        return jsonify({"error": f"Unsupported type. Allowed: {', '.join(sorted(ALLOWED))}"}), 400
+        return jsonify({"error": "Unsupported type. Allowed: %s" % ", ".join(sorted(ALLOWED))}), 400
     data = f.read()
     if len(data) > MAX_SIZE:
         return jsonify({"error": "File exceeds 20 MB"}), 413
@@ -72,22 +69,19 @@ def extract_text():
         "file_name": f.filename,
         "file_type": ext,
     })
-
     log.info("Invoking '%s' for '%s' (%d bytes)", FUNC_NAME, f.filename, len(data))
     t0 = time.perf_counter()
-
     try:
         c = _client()
-        # Pre-check function state
         try:
             cfg = c.get_function(FunctionName=FUNC_NAME).get("Configuration", {})
             state = cfg.get("State", "Unknown")
             if state != "Active":
-                return jsonify({"error": f"Lambda state='{state}'. Wait for deployment."}), 503
+                return jsonify({"error": "Lambda state='%s'. Wait for deployment." % state}), 503
         except ClientError as e:
             if e.response["Error"]["Code"] == "ResourceNotFoundException":
                 funcs = [fn["FunctionName"] for fn in c.list_functions().get("Functions", [])]
-                return jsonify({"error": f"Lambda '{FUNC_NAME}' not found. Available: {funcs}"}), 503
+                return jsonify({"error": "Lambda '%s' not found. Available: %s" % (FUNC_NAME, funcs)}), 503
             raise
 
         resp = c.invoke(FunctionName=FUNC_NAME, InvocationType="RequestResponse", Payload=payload)
@@ -96,11 +90,10 @@ def extract_text():
 
         if "FunctionError" in resp:
             log.error("FunctionError: %s", raw[:500])
-            return jsonify({"error": f"Lambda error: {raw[:500]}"}), 502
+            return jsonify({"error": "Lambda error: %s" % raw[:500]}), 502
 
         result = json.loads(raw)
         body = json.loads(result["body"]) if isinstance(result.get("body"), str) else result.get("body", result)
-
         if result.get("statusCode", 200) >= 400:
             return jsonify({"error": body.get("error", "Extraction failed")}), 502
 
@@ -111,23 +104,21 @@ def extract_text():
         })
     except ClientError as e:
         log.exception("AWS error")
-        return jsonify({"error": f"AWS: {e.response['Error']['Message']}"}), 502
+        return jsonify({"error": "AWS: %s" % e.response["Error"]["Message"]}), 502
     except Exception as e:
         log.exception("Failed")
         return jsonify({"error": str(e)}), 502
-
 
 @app.route("/api/health", methods=["GET"])
 def health():
     try:
         c = _client()
         cfg = c.get_function(FunctionName=FUNC_NAME).get("Configuration", {})
-        layers = [l.get("Arn","") for l in cfg.get("Layers", [])]
         return jsonify({"status": "ok", "lambda_state": cfg.get("State"),
-                        "function": FUNC_NAME, "layers": layers})
+                        "runtime": cfg.get("Runtime"), "function": FUNC_NAME,
+                        "layers": [l.get("Arn","") for l in cfg.get("Layers", [])]})
     except Exception as e:
         return jsonify({"status": "ok", "lambda_state": "not_found", "error": str(e)})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -3,34 +3,30 @@ version: "3.8"
 # ─────────────────────────────────────────────────────────────
 #  PDF & Image OCR Extraction Stack
 #
-#  Uses LocalStack COMMUNITY edition (no Pro features).
+#  LocalStack COMMUNITY edition (no Pro features needed).
 #
-#  Since LAMBDA_RUNTIME_IMAGE_MAPPING is Pro-only, we use a
-#  Lambda LAYER to inject Tesseract + Poppler binaries into
-#  the standard python3.11 Lambda container at /opt.
+#  Key fix: Tesseract is NOT in Amazon Linux 2023 repos.
+#  python3.11 Lambda runtime → AL2023 → no tesseract.
+#  python3.9  Lambda runtime → AL2    → tesseract in EPEL ✓
 #
-#  Startup order:
-#    1. layer-builder  → builds Tesseract layer zip (Amazon Linux 2023)
-#    2. localstack     → starts (latest community)
-#    3. deployer       → publishes layer, creates function, waits Active
-#    4. backend        → Flask API (starts after deployer confirms Active)
-#    5. frontend       → Nginx + Tailwind CSS
+#  So we:
+#    1. Build the layer on amazonlinux:2 (EPEL has tesseract)
+#    2. Deploy Lambda with python3.9 runtime (also AL2-based)
+#    3. Binary compatibility guaranteed ✓
 # ─────────────────────────────────────────────────────────────
 
 services:
 
-  # ── 1. Build Tesseract + Poppler Lambda Layer ────────────
-  # Uses amazonlinux:2023 (same OS as Lambda python3.11 runtime)
-  # to ensure binary compatibility. Outputs /out/layer.zip.
+  # ── 1. Build Tesseract Layer on Amazon Linux 2 ───────────
   layer-builder:
-    image: amazonlinux:2023
+    image: amazonlinux:2
     container_name: ocr-layer-builder
     volumes:
       - ./layer-builder/build-layer.sh:/build-layer.sh:ro
       - layer-data:/out
     entrypoint: ["/bin/bash", "/build-layer.sh"]
 
-  # ── 2. LocalStack Community ──────────────────────────────
+  # ── 2. LocalStack Community (latest) ─────────────────────
   localstack:
     image: localstack/localstack:latest
     container_name: ocr-localstack
@@ -43,7 +39,6 @@ services:
       # Lambda containers need Docker socket + same network
       - LAMBDA_DOCKER_NETWORK=ocr-net
     volumes:
-      # REQUIRED for Lambda: LocalStack spawns separate containers
       - /var/run/docker.sock:/var/run/docker.sock
       - localstack-data:/var/lib/localstack
     healthcheck:

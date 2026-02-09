@@ -1,102 +1,115 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────
-#  Builds a Lambda Layer zip containing:
-#    - tesseract binary + shared libs + eng.traineddata
-#    - pdftoppm (poppler-utils) binary + shared libs
-#
-#  Uses Amazon Linux 2023 (same as Lambda python3.11 runtime)
-#  so all binaries are ABI-compatible.
-#
-#  Output: /out/layer.zip  (mounted volume)
+#  Build Tesseract + Poppler Lambda Layer on Amazon Linux 2
+#  Output: /out/layer.zip
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
 echo "╔══════════════════════════════════════════════╗"
-echo "║  Building Tesseract Lambda Layer             ║"
+echo "║  Building Tesseract Lambda Layer (AL2)       ║"
 echo "╚══════════════════════════════════════════════╝"
 
-# ── Install Tesseract + Poppler from AL2023 repos ──
-echo "→ Installing tesseract + poppler-utils..."
-dnf install -y \
+# ── Install everything we need ──
+echo "→ Installing packages..."
+yum install -y \
+    which \
+    findutils \
+    zip \
+    > /dev/null 2>&1
+
+echo "→ Enabling EPEL..."
+amazon-linux-extras install epel -y > /dev/null 2>&1
+
+echo "→ Installing tesseract + poppler..."
+yum install -y \
     tesseract \
     tesseract-langpack-eng \
     poppler-utils \
-    zip \
-    findutils \
     > /dev/null 2>&1
 
-echo "  tesseract: $(tesseract --version 2>&1 | head -1)"
-echo "  pdftoppm:  $(pdftoppm -v 2>&1 | head -1 || echo ok)"
+# ── Verify installs ──
+TESS_BIN=$(command -v tesseract 2>/dev/null || true)
+PDFTOPPM_BIN=$(command -v pdftoppm 2>/dev/null || true)
+
+if [ -z "$TESS_BIN" ]; then
+    echo "✗ tesseract not found after install!"
+    exit 1
+fi
+echo "  tesseract: $TESS_BIN → $(tesseract --version 2>&1 | head -1)"
+
+if [ -z "$PDFTOPPM_BIN" ]; then
+    echo "⚠ pdftoppm not found (poppler-utils may have failed)"
+else
+    echo "  pdftoppm:  $PDFTOPPM_BIN"
+fi
 
 # ── Create layer directory structure ──
-# Lambda layers extract to /opt, so we mirror that layout:
-#   /opt/bin/          ← binaries
-#   /opt/lib/          ← shared libraries
-#   /opt/share/tessdata/ ← OCR training data
-LAYER_DIR="/tmp/layer"
-mkdir -p "${LAYER_DIR}/bin" "${LAYER_DIR}/lib" "${LAYER_DIR}/share/tessdata"
+LAYER="/tmp/layer"
+mkdir -p "${LAYER}/bin" "${LAYER}/lib" "${LAYER}/share/tessdata"
 
 # ── Copy binaries ──
 echo "→ Copying binaries..."
-cp "$(which tesseract)" "${LAYER_DIR}/bin/"
-cp "$(which pdftoppm)"  "${LAYER_DIR}/bin/"
+cp "$TESS_BIN" "${LAYER}/bin/"
+[ -n "$PDFTOPPM_BIN" ] && cp "$PDFTOPPM_BIN" "${LAYER}/bin/"
 
-# ── Copy tessdata (eng) ──
+PDFTOTEXT_BIN=$(command -v pdftotext 2>/dev/null || true)
+[ -n "$PDFTOTEXT_BIN" ] && cp "$PDFTOTEXT_BIN" "${LAYER}/bin/"
+
+echo "  ✓ bin/: $(ls ${LAYER}/bin/)"
+
+# ── Copy tessdata ──
 echo "→ Copying tessdata..."
-TESSDATA_SRC=$(find /usr/share -name "eng.traineddata" 2>/dev/null | head -1)
-if [ -z "$TESSDATA_SRC" ]; then
-    echo "  ✗ eng.traineddata not found!"
+TESS_DATA=$(find /usr/share -name "eng.traineddata" -type f 2>/dev/null | head -1)
+if [ -z "$TESS_DATA" ]; then
+    echo "✗ eng.traineddata not found!"
     find /usr/share/tesseract* -type f 2>/dev/null || true
     exit 1
 fi
-TESSDATA_DIR=$(dirname "$TESSDATA_SRC")
-cp "${TESSDATA_DIR}/eng.traineddata" "${LAYER_DIR}/share/tessdata/"
-# Copy OSD data if present (for page orientation detection)
-[ -f "${TESSDATA_DIR}/osd.traineddata" ] && \
-    cp "${TESSDATA_DIR}/osd.traineddata" "${LAYER_DIR}/share/tessdata/" || true
-echo "  ✓ tessdata: $(ls ${LAYER_DIR}/share/tessdata/)"
+TESS_DIR=$(dirname "$TESS_DATA")
+cp "${TESS_DIR}/eng.traineddata" "${LAYER}/share/tessdata/"
+[ -f "${TESS_DIR}/osd.traineddata" ] && \
+    cp "${TESS_DIR}/osd.traineddata" "${LAYER}/share/tessdata/" || true
+echo "  ✓ tessdata: $(ls ${LAYER}/share/tessdata/)"
 
-# ── Copy shared libraries (resolve all dependencies) ──
-echo "→ Resolving shared library dependencies..."
-collect_libs() {
-    local binary="$1"
-    ldd "$binary" 2>/dev/null | grep "=> /" | awk '{print $3}' | sort -u
+# ── Copy shared libraries ──
+echo "→ Resolving shared libraries..."
+SKIP_RE="linux-vdso|ld-linux|libpthread|libdl\.so|librt\.so|libm\.so|libc\.so|libgcc_s|libstdc\+\+"
+
+copy_libs_for() {
+    local bin="$1"
+    [ ! -f "$bin" ] && return
+    ldd "$bin" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read -r lib; do
+        local base
+        base=$(basename "$lib")
+        # Skip libs already in the Lambda base image
+        if echo "$base" | grep -qE "$SKIP_RE"; then
+            continue
+        fi
+        # Skip if already copied
+        if [ -f "${LAYER}/lib/${base}" ]; then
+            continue
+        fi
+        cp -L "$lib" "${LAYER}/lib/" 2>/dev/null || true
+    done
 }
 
-# Collect all unique library paths needed by our binaries
-LIBS_NEEDED=$(
-    {
-        collect_libs "$(which tesseract)"
-        collect_libs "$(which pdftoppm)"
-    } | sort -u
-)
+copy_libs_for "$TESS_BIN"
+[ -n "$PDFTOPPM_BIN" ] && copy_libs_for "$PDFTOPPM_BIN"
 
-# Copy libraries that are NOT already in the Lambda base image
-# (Lambda base has glibc, libstdc++, etc. — we skip those)
-SKIP_LIBS="linux-vdso|ld-linux|libpthread|libdl|librt|libm\.so|libc\.so|libstdc\+\+|libgcc_s"
-for lib in $LIBS_NEEDED; do
-    BASENAME=$(basename "$lib")
-    if echo "$BASENAME" | grep -qE "$SKIP_LIBS"; then
-        continue  # Skip libs already in Lambda base
-    fi
-    cp -L "$lib" "${LAYER_DIR}/lib/" 2>/dev/null || true
-done
+LIB_COUNT=$(ls "${LAYER}/lib/" | wc -l)
+echo "  ✓ ${LIB_COUNT} libraries copied"
+ls -1 "${LAYER}/lib/" | head -15
+[ "$LIB_COUNT" -gt 15 ] && echo "  ... and more"
 
-echo "  ✓ Libraries: $(ls ${LAYER_DIR}/lib/ | wc -l) files"
-ls -1 "${LAYER_DIR}/lib/" | head -20
-[ "$(ls ${LAYER_DIR}/lib/ | wc -l)" -gt 20 ] && echo "  ... and more"
-
-# ── Create layer zip ──
-echo "→ Creating layer zip..."
-cd "${LAYER_DIR}"
+# ── Create zip ──
+echo "→ Creating layer.zip..."
+cd "${LAYER}"
 zip -r9 /out/layer.zip . > /dev/null 2>&1
-echo "  ✓ Layer zip: $(du -sh /out/layer.zip | cut -f1)"
 
-# ── Summary ──
 echo ""
-echo "Layer contents:"
-echo "  bin/:   $(ls bin/)"
-echo "  lib/:   $(ls lib/ | wc -l) shared libraries"
-echo "  share/: $(ls share/tessdata/)"
-echo ""
-echo "✓ Layer build complete!"
+echo "════════════════════════════════════════════════"
+echo "  ✓ Layer zip: $(du -sh /out/layer.zip | cut -f1)"
+echo "  bin/:          $(ls bin/)"
+echo "  lib/:          ${LIB_COUNT} shared libraries"
+echo "  share/tessdata: $(ls share/tessdata/)"
+echo "════════════════════════════════════════════════"
