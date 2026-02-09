@@ -1,23 +1,17 @@
 version: "3.8"
 
-# ─────────────────────────────────────────────────────────────
-#  PDF & Image OCR Extraction Stack
+# ─────────────────────────────────────────────────────
+#  PDF & Image OCR Stack - LocalStack Community
 #
-#  LocalStack COMMUNITY edition (no Pro features needed).
-#
-#  Key fix: Tesseract is NOT in Amazon Linux 2023 repos.
-#  python3.11 Lambda runtime → AL2023 → no tesseract.
-#  python3.9  Lambda runtime → AL2    → tesseract in EPEL ✓
-#
-#  So we:
-#    1. Build the layer on amazonlinux:2 (EPEL has tesseract)
-#    2. Deploy Lambda with python3.9 runtime (also AL2-based)
-#    3. Binary compatibility guaranteed ✓
-# ─────────────────────────────────────────────────────────────
+#  Approach: bundle tesseract binaries directly in the
+#  Lambda function zip (no Layer needed).
+#  Binary builder runs on amazonlinux:2 for ABI compat
+#  with the python3.9 Lambda runtime (also AL2).
+# ─────────────────────────────────────────────────────
 
 services:
 
-  # ── 1. Build Tesseract Layer on Amazon Linux 2 ───────────
+  # 1. Build tesseract binaries on Amazon Linux 2
   layer-builder:
     image: amazonlinux:2
     container_name: ocr-layer-builder
@@ -26,7 +20,7 @@ services:
       - layer-data:/out
     entrypoint: ["/bin/bash", "/build-layer.sh"]
 
-  # ── 2. LocalStack Community (latest) ─────────────────────
+  # 2. LocalStack
   localstack:
     image: localstack/localstack:latest
     container_name: ocr-localstack
@@ -36,7 +30,6 @@ services:
       - SERVICES=lambda,iam,logs
       - DEBUG=1
       - EAGER_SERVICE_LOADING=1
-      # Lambda containers need Docker socket + same network
       - LAMBDA_DOCKER_NETWORK=ocr-net
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -53,7 +46,7 @@ services:
     networks:
       - ocr-net
 
-  # ── 3. Deployer: publish layer + create function ─────────
+  # 3. Deploy Lambda (merges binaries + handler into one zip)
   deployer:
     build: ./deployer
     container_name: ocr-deployer
@@ -70,7 +63,7 @@ services:
     networks:
       - ocr-net
 
-  # ── 4. Flask Backend ─────────────────────────────────────
+  # 4. Flask backend
   backend:
     build: ./backend
     container_name: ocr-backend
@@ -88,7 +81,7 @@ services:
     networks:
       - ocr-net
 
-  # ── 5. Nginx Frontend ───────────────────────────────────
+  # 5. Frontend
   frontend:
     build: ./frontend
     container_name: ocr-frontend

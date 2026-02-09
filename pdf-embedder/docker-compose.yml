@@ -1,0 +1,8 @@
+services:
+  pdf-embedder:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MAX_UPLOAD_MB=50

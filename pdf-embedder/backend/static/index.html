@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>PDF Embedder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-10">
+<div class="max-w-xl mx-auto bg-white shadow rounded p-6">
+  <h1 class="text-2xl font-bold mb-4">PDF Embedder</h1>
+
+  <form id="uploadForm" class="space-y-4">
+    <div>
+      <label class="block font-semibold">PDF File</label>
+      <input type="file" name="pdf" accept="application/pdf" required
+             class="w-full border rounded p-2"/>
+    </div>
+
+    <div>
+      <label class="block font-semibold">Image / Excel / Any File</label>
+      <input type="file" name="extra" required
+             class="w-full border rounded p-2"/>
+    </div>
+
+    <button class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
+      Embed and Download
+    </button>
+  </form>
+
+  <div id="status" class="mt-4 text-sm text-gray-600"></div>
+</div>
+
+<script>
+document.getElementById("uploadForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+
+  document.getElementById("status").innerText = "Processing PDF...";
+
+  const res = await fetch("/api/embed", {
+    method: "POST",
+    body: fd
+  });
+
+  if (!res.ok) {
+    document.getElementById("status").innerText = "Error processing PDF";
+    return;
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "updated.pdf";
+  a.click();
+
+  document.getElementById("status").innerText = "Download ready.";
+});
+</script>
+</body>
+</html>

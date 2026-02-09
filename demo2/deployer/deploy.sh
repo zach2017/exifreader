@@ -1,18 +1,11 @@
 #!/bin/bash
-# ──────────────────────────────────────────────────────────────
-#  Deployer: publishes Tesseract Lambda Layer, creates function
-#  with python3.9 runtime (Amazon Linux 2 — matches the layer),
-#  waits for Active state.
-# ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
 FUNCTION_NAME="ocr-extract"
-LAYER_NAME="tesseract-layer"
 LAYER_ZIP="/layers/layer.zip"
 ENDPOINT="http://localstack:4566"
 REGION="us-east-1"
 ROLE_ARN="arn:aws:iam::000000000000:role/lambda-ocr-role"
-# IMPORTANT: python3.9 runs on Amazon Linux 2 — same OS the layer was built on
 RUNTIME="python3.9"
 
 export AWS_ACCESS_KEY_ID=test
@@ -22,70 +15,78 @@ export AWS_DEFAULT_REGION=$REGION
 awsl() { aws --endpoint-url="$ENDPOINT" --region "$REGION" "$@"; }
 
 echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║  OCR Lambda Deployer                             ║"
-echo "╚══════════════════════════════════════════════════╝"
+echo "========================================"
+echo "  OCR Lambda Deployer"
+echo "========================================"
 
-# ── 1. Wait for layer.zip ──
-echo "→ [1/7] Waiting for layer zip..."
-for i in $(seq 1 180); do
-    [ -f "$LAYER_ZIP" ] && break
-    [ "$i" -eq 180 ] && { echo "✗ layer.zip not found after 3min"; exit 1; }
+echo "[1/6] Waiting for layer zip..."
+TRIES=0
+while [ ! -f "$LAYER_ZIP" ]; do
+    TRIES=$((TRIES + 1))
+    if [ "$TRIES" -ge 180 ]; then
+        echo "FAIL: layer.zip not found"
+        exit 1
+    fi
     sleep 1
 done
-echo "  ✓ Found: $(du -sh $LAYER_ZIP | cut -f1)"
+echo "  Found layer zip"
 
-# ── 2. Build function zip ──
-echo "→ [2/7] Building function zip..."
-mkdir -p /tmp/fn
-pip install --quiet --no-cache-dir -t /tmp/fn \
-    PyPDF2==3.0.1 \
-    pytesseract==0.3.10 \
-    Pillow==10.3.0 \
-    pdf2image==1.17.0 \
-    typing_extensions>=4.0
-cp /src/handler.py /tmp/fn/
-cd /tmp/fn && zip -r9 /tmp/function.zip . > /dev/null 2>&1
-echo "  ✓ Function zip: $(du -sh /tmp/function.zip | cut -f1)"
+echo "[2/6] Building combined function zip..."
+# Strategy: merge tesseract binaries + python code into ONE zip.
+# The zip extracts to /var/task/ in the Lambda container.
+# So bin/tesseract becomes /var/task/bin/tesseract etc.
+BUILD_DIR="/tmp/build"
+mkdir -p "$BUILD_DIR"
 
-# ── 3. Wait for Lambda service ──
-echo "→ [3/7] Waiting for LocalStack Lambda service..."
-for i in $(seq 1 60); do
-    STATUS=$(curl -sf "$ENDPOINT/_localstack/health" 2>/dev/null \
-        | python3 -c "import sys,json;print(json.load(sys.stdin).get('services',{}).get('lambda','?'))" 2>/dev/null || echo "?")
+# Unpack tesseract binaries (bin/, lib/, share/) into build dir
+cd "$BUILD_DIR"
+unzip -qo "$LAYER_ZIP"
+echo "  Unpacked layer: $(ls)"
+
+# Make binaries executable
+chmod +x "$BUILD_DIR/bin/"* 2>/dev/null || true
+
+# Install PyPDF2 (pure Python, only pip dependency)
+pip3 install --no-cache-dir --target "$BUILD_DIR" 'PyPDF2==3.0.1'
+
+# Copy handler
+cp /src/handler.py "$BUILD_DIR/"
+
+# Create the combined zip
+cd "$BUILD_DIR"
+zip -r9 /tmp/function.zip . > /dev/null 2>&1
+ZIP_SIZE=$(du -sh /tmp/function.zip | cut -f1)
+echo "  Combined zip: $ZIP_SIZE"
+echo "  Contents: handler.py + PyPDF2 + bin/ + lib/ + share/"
+
+echo "[3/6] Waiting for Lambda service..."
+TRIES=0
+while true; do
+    TRIES=$((TRIES + 1))
+    HEALTH=$(curl -sf "$ENDPOINT/_localstack/health" 2>/dev/null || echo '{}')
+    STATUS=$(echo "$HEALTH" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("services",{}).get("lambda","unknown"))' 2>/dev/null || echo "unknown")
     if [ "$STATUS" = "running" ] || [ "$STATUS" = "available" ]; then
-        echo "  ✓ Lambda service: $STATUS"; break
+        echo "  Lambda service ready"
+        break
     fi
-    echo "  ... $STATUS ($i/60)"
+    if [ "$TRIES" -ge 60 ]; then
+        echo "  Timeout, continuing anyway"
+        break
+    fi
     sleep 2
 done
 
-# ── 4. Create IAM role ──
-echo "→ [4/7] Creating IAM role..."
+echo "[4/6] Creating IAM role..."
 awsl iam create-role \
     --role-name lambda-ocr-role \
-    --assume-role-policy-document '{
-        "Version":"2012-10-17",
-        "Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]
-    }' > /dev/null 2>&1 || echo "  (exists)"
+    --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+    > /dev/null 2>&1 || echo "  (exists)"
 
-# ── 5. Publish Layer ──
-echo "→ [5/7] Publishing Lambda Layer..."
-LAYER_OUT=$(awsl lambda publish-layer-version \
-    --layer-name "$LAYER_NAME" \
-    --description "Tesseract OCR + Poppler (built on Amazon Linux 2)" \
-    --zip-file "fileb://${LAYER_ZIP}" \
-    --compatible-runtimes python3.9 \
-    --output json)
-LAYER_ARN=$(echo "$LAYER_OUT" | python3 -c "import sys,json;print(json.load(sys.stdin)['LayerVersionArn'])")
-echo "  ✓ $LAYER_ARN"
-
-# ── 6. Create function ──
-echo "→ [6/7] Creating Lambda function..."
+echo "[5/6] Creating function (no layers - binaries bundled in zip)..."
 awsl lambda delete-function --function-name "$FUNCTION_NAME" 2>/dev/null || true
 sleep 2
 
-CREATE_OUT=$(awsl lambda create-function \
+awsl lambda create-function \
     --function-name "$FUNCTION_NAME" \
     --runtime "$RUNTIME" \
     --role "$ROLE_ARN" \
@@ -93,56 +94,47 @@ CREATE_OUT=$(awsl lambda create-function \
     --zip-file fileb:///tmp/function.zip \
     --timeout 120 \
     --memory-size 1024 \
-    --layers "$LAYER_ARN" \
-    --environment "Variables={TESSDATA_PREFIX=/opt/share/tessdata,PATH=/opt/bin:/var/lang/bin:/usr/local/bin:/usr/bin:/bin,LD_LIBRARY_PATH=/opt/lib:/var/lang/lib:/lib64:/usr/lib64}" \
-    --output json)
+    --environment '{"Variables":{"TESSDATA_PREFIX":"/var/task/share/tessdata","LD_LIBRARY_PATH":"/var/task/lib:/var/lang/lib:/lib64:/usr/lib64"}}' \
+    --query 'FunctionName' \
+    --output text
+echo "  Created"
 
-echo "$CREATE_OUT" | python3 -c "
-import sys,json; d=json.load(sys.stdin)
-print(f\"  Name:    {d.get('FunctionName')}\")
-print(f\"  Runtime: {d.get('Runtime')}\")
-print(f\"  State:   {d.get('State','?')}\")
-print(f\"  Layers:  {[l['Arn'] for l in d.get('Layers',[])]}\")
-"
-
-# ── 7. Wait for Active ──
-echo "→ [7/7] Waiting for Active state..."
-for i in $(seq 1 90); do
+echo "[6/6] Waiting for Active..."
+TRIES=0
+while true; do
+    TRIES=$((TRIES + 1))
     STATE=$(awsl lambda get-function --function-name "$FUNCTION_NAME" \
         --query 'Configuration.State' --output text 2>/dev/null || echo "NOT_FOUND")
     if [ "$STATE" = "Active" ]; then
-        echo "  ✓ Function is Active!"; break
+        echo "  Active!"
+        break
     fi
     if [ "$STATE" = "Failed" ]; then
-        echo "  ✗ FAILED"; awsl lambda get-function --function-name "$FUNCTION_NAME" --output json; exit 1
+        echo "  FAILED"
+        exit 1
     fi
-    echo "  State=$STATE ($i/90)"
-    [ "$i" -eq 90 ] && { echo "✗ Timed out"; exit 1; }
+    if [ "$TRIES" -ge 90 ]; then
+        echo "  Timed out"
+        exit 1
+    fi
+    echo "  state=$STATE ($TRIES/90)"
     sleep 2
 done
 
-# ── Verify ──
 echo ""
-echo "→ Functions:"
-awsl lambda list-functions --query 'Functions[].{Name:FunctionName,State:State,Runtime:Runtime}' --output table 2>/dev/null || true
-echo ""
-echo "→ Layers:"
-awsl lambda list-layers --output table 2>/dev/null || true
-
-# ── Test invocation ──
-echo ""
-echo "→ Test invoke..."
+echo "Test invoke..."
 awsl lambda invoke \
     --function-name "$FUNCTION_NAME" \
     --payload '{"file_data":"dGVzdA==","file_type":"png","file_name":"test.png"}' \
     --cli-binary-format raw-in-base64-out \
     /tmp/test.json 2>&1 || true
-echo "  Response: $(cat /tmp/test.json 2>/dev/null | head -c 300)"
+cat /tmp/test.json 2>/dev/null || true
+echo ""
 
 echo ""
-echo "════════════════════════════════════════════════════"
-echo "  ✓ OCR Stack Ready!"
+echo "========================================"
+echo "  OCR Stack Ready!"
 echo "  Frontend:   http://localhost:8080"
-echo "  Backend:    http://localhost:5000/api/health"
+echo "  Backend:    http://localhost:5000"
 echo "  LocalStack: http://localhost:4566"
-echo "════════════════════════════════════════════════════"
+echo "========================================"

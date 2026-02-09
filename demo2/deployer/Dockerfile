@@ -5,4 +5,4 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 COPY deploy.sh /deploy.sh
 RUN chmod +x /deploy.sh
-CMD ["/deploy.sh"]
+CMD ["/bin/bash", "/deploy.sh"]
