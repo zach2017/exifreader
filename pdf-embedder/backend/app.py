@@ -1,15 +1,41 @@
+import base64
 import io
 import os
+import time
+import uuid
+import mimetypes
+from typing import Dict, Any
+
 from flask import Flask, request, send_file, send_from_directory, jsonify
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from PIL import Image
 
+try:
+    from openpyxl import load_workbook
+except Exception:
+    load_workbook = None
+
 app = Flask(__name__, static_folder="static", static_url_path="")
 
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+# token -> {"ts": epoch_seconds, "pdf_bytes": bytes, "attachments": {name: bytes}}
+VERIFY_STORE: Dict[str, Dict[str, Any]] = {}
+VERIFY_TTL_SECONDS = int(os.getenv("VERIFY_TTL_SECONDS", "900"))  # 15 minutes default
+
+
+def _too_large(content_length):
+    return content_length is not None and content_length > MAX_BYTES
+
+
+def _cleanup_store():
+    now = time.time()
+    expired = [k for k, v in VERIFY_STORE.items() if (now - v.get("ts", now)) > VERIFY_TTL_SECONDS]
+    for k in expired:
+        VERIFY_STORE.pop(k, None)
 
 
 def make_image_overlay_pdf(image_bytes, page_w, page_h, placement="top-right"):
@@ -42,6 +68,128 @@ def make_image_overlay_pdf(image_bytes, page_w, page_h, placement="top-right"):
     return buf.getvalue()
 
 
+def _read_attachments(reader: PdfReader) -> Dict[str, bytes]:
+    """
+    Robust extraction of embedded file attachments (a.k.a. "File Attachments").
+    Walks the PDF catalog: /Root -> /Names -> /EmbeddedFiles -> /Names.
+    Returns: {filename: bytes}
+    """
+    attachments: Dict[str, bytes] = {}
+
+    def _safe_text(obj) -> str:
+        try:
+            return str(obj)
+        except Exception:
+            return "attachment.bin"
+
+    try:
+        root = reader.trailer.get("/Root")
+        if not root:
+            return attachments
+
+        names = root.get("/Names")
+        if not names:
+            return attachments
+
+        embedded = names.get("/EmbeddedFiles")
+        if not embedded:
+            return attachments
+
+        names_array = embedded.get("/Names")
+        if not names_array:
+            return attachments
+
+        # names_array is like: [name1, fileSpec1, name2, fileSpec2, ...]
+        for i in range(0, len(names_array), 2):
+            try:
+                fname_obj = names_array[i]
+                filespec = names_array[i + 1]
+            except Exception:
+                continue
+
+            fname = _safe_text(fname_obj)
+
+            try:
+                ef = filespec.get("/EF")
+                if not ef:
+                    continue
+                fstream = ef.get("/F")
+                if not fstream:
+                    continue
+
+                data = fstream.get_data()
+                attachments[fname] = data
+            except Exception:
+                # Some PDFs store the stream under /UF or other keys; try a few fallbacks
+                try:
+                    ef = filespec.get("/EF") or {}
+                    for key in ("/UF", "/F", "/DOS", "/Mac", "/Unix"):
+                        st = ef.get(key)
+                        if st:
+                            attachments[fname] = st.get_data()
+                            break
+                except Exception:
+                    pass
+
+    except Exception:
+        pass
+
+    # As a last resort, try pypdf's built-in attachments property if present
+    if not attachments:
+        try:
+            att = getattr(reader, "attachments", None)
+            if att and isinstance(att, dict):
+                for k, v in att.items():
+                    if isinstance(v, (bytes, bytearray)):
+                        attachments[str(k)] = bytes(v)
+                    else:
+                        try:
+                            attachments[str(k)] = bytes(v[0])
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    return attachments
+
+
+def _guess_mime(filename: str) -> str:
+    mt, _ = mimetypes.guess_type(filename)
+    return mt or "application/octet-stream"
+
+
+def _xlsx_preview(xlsx_bytes: bytes, max_rows: int = 50, max_cols: int = 20) -> Dict[str, Any]:
+    if load_workbook is None:
+        return {"type": "error", "message": "openpyxl not available in server image."}
+
+    wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True, read_only=True)
+    ws = wb.worksheets[0]
+    rows = []
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i >= max_rows:
+            break
+        rows.append([("" if v is None else v) for v in row[:max_cols]])
+    wb.close()
+
+    def norm(v):
+        if isinstance(v, (int, float)):
+            return v
+        return str(v)
+
+    normalized = [[norm(v) for v in r] for r in rows]
+    return {"type": "table", "sheet": ws.title, "rows": normalized}
+
+
+def _csv_preview(csv_bytes: bytes, max_rows: int = 80) -> Dict[str, Any]:
+    try:
+        text = csv_bytes.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        rows = [l.split(",") for l in lines[:max_rows]]
+        return {"type": "table", "sheet": "CSV", "rows": rows}
+    except Exception as e:
+        return {"type": "error", "message": f"CSV preview failed: {e}"}
+
+
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
@@ -49,13 +197,23 @@ def index():
 
 @app.post("/api/embed")
 def embed():
-    if "pdf" not in request.files or "extra" not in request.files:
-        return jsonify({"error": "Missing files"}), 400
+    if _too_large(request.content_length):
+        return jsonify({"error": f"Upload too large (max {MAX_UPLOAD_MB} MB)."}), 413
 
-    pdf_bytes = request.files["pdf"].read()
+    if "pdf" not in request.files or "extra" not in request.files:
+        return jsonify({"error": "Missing required files: pdf and extra"}), 400
+
+    pdf_file = request.files["pdf"]
     extra_file = request.files["extra"]
+
+    pdf_bytes = pdf_file.read()
     extra_bytes = extra_file.read()
     extra_name = extra_file.filename or "attachment.bin"
+
+    if not pdf_bytes:
+        return jsonify({"error": "PDF is empty"}), 400
+    if not extra_bytes:
+        return jsonify({"error": "Extra file is empty"}), 400
 
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
@@ -63,32 +221,117 @@ def embed():
     for p in reader.pages:
         writer.add_page(p)
 
-    # always embed file as attachment
+    # Embed attachment
     try:
         writer.add_attachment(extra_name, extra_bytes)
-    except Exception:
-        pass
+    except Exception as e:
+        return jsonify({"error": f"Failed to embed attachment: {e}"}), 500
 
-    # if image also overlay on first page
-    if extra_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+    # If image, also stamp onto first page
+    name_lower = extra_name.lower()
+    is_image = name_lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")) or (extra_file.mimetype or "").startswith("image/")
+    if is_image and len(writer.pages) > 0:
+        placement = request.form.get("placement", "top-right")
         first = writer.pages[0]
         w, h = float(first.mediabox.width), float(first.mediabox.height)
-
-        overlay_pdf = make_image_overlay_pdf(extra_bytes, w, h)
-        overlay_reader = PdfReader(io.BytesIO(overlay_pdf))
-        first.merge_page(overlay_reader.pages[0])
+        try:
+            overlay_pdf = make_image_overlay_pdf(extra_bytes, w, h, placement=placement)
+            overlay_reader = PdfReader(io.BytesIO(overlay_pdf))
+            first.merge_page(overlay_reader.pages[0])
+        except Exception as e:
+            return jsonify({"error": f"Embedded attachment but failed to stamp image: {e}"}), 500
 
     out = io.BytesIO()
     writer.write(out)
     out.seek(0)
 
-    return send_file(
-        out,
-        as_attachment=True,
-        download_name="updated.pdf",
-        mimetype="application/pdf"
-    )
+    return send_file(out, as_attachment=True, download_name="updated.pdf", mimetype="application/pdf")
+
+
+@app.post("/api/verify")
+def verify():
+    _cleanup_store()
+
+    if _too_large(request.content_length):
+        return jsonify({"error": f"Upload too large (max {MAX_UPLOAD_MB} MB)."}), 413
+
+    if "pdf" not in request.files:
+        return jsonify({"error": "Missing required file: pdf"}), 400
+
+    pdf_bytes = request.files["pdf"].read()
+    if not pdf_bytes:
+        return jsonify({"error": "PDF is empty"}), 400
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    attachments = _read_attachments(reader)
+
+    token = str(uuid.uuid4())
+    VERIFY_STORE[token] = {"ts": time.time(), "pdf_bytes": pdf_bytes, "attachments": attachments}
+
+    items = []
+    for name, b in attachments.items():
+        items.append({"name": name, "size": len(b), "mime": _guess_mime(name)})
+
+    return jsonify({
+        "token": token,
+        "attachment_count": len(items),
+        "attachments": sorted(items, key=lambda x: x["name"].lower())
+    })
+
+
+@app.get("/api/verify/attachment")
+def verify_attachment():
+    _cleanup_store()
+    token = request.args.get("token", "")
+    name = request.args.get("name", "")
+
+    if not token or token not in VERIFY_STORE:
+        return jsonify({"error": "Invalid/expired token. Re-upload PDF to verify again."}), 400
+
+    attachments = VERIFY_STORE[token].get("attachments", {})
+    if name not in attachments:
+        return jsonify({"error": "Attachment not found in this PDF."}), 404
+
+    data = attachments[name]
+    mt = _guess_mime(name)
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=name, mimetype=mt)
+
+
+@app.get("/api/verify/preview")
+def verify_preview():
+    _cleanup_store()
+    token = request.args.get("token", "")
+    name = request.args.get("name", "")
+
+    if not token or token not in VERIFY_STORE:
+        return jsonify({"type": "error", "message": "Invalid/expired token. Re-upload PDF to verify again."}), 400
+
+    attachments = VERIFY_STORE[token].get("attachments", {})
+    if name not in attachments:
+        return jsonify({"type": "error", "message": "Attachment not found in this PDF."}), 404
+
+    data = attachments[name]
+    lower = name.lower()
+    mime = _guess_mime(name)
+
+    if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")) or mime.startswith("image/"):
+        b64 = base64.b64encode(data).decode("ascii")
+        return jsonify({"type": "image", "mime": mime, "dataUrl": f"data:{mime};base64,{b64}"})
+
+    if lower.endswith((".xlsx", ".xlsm")):
+        return jsonify(_xlsx_preview(data))
+
+    if lower.endswith(".csv"):
+        return jsonify(_csv_preview(data))
+
+    return jsonify({
+        "type": "info",
+        "name": name,
+        "size": len(data),
+        "mime": mime,
+        "message": "No built-in preview for this file type. You can still download it."
+    })
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))

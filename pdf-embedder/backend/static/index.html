@@ -1,63 +1,318 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>PDF Embedder</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Embedder + Verify</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 p-10">
-<div class="max-w-xl mx-auto bg-white shadow rounded p-6">
-  <h1 class="text-2xl font-bold mb-4">PDF Embedder</h1>
-
-  <form id="uploadForm" class="space-y-4">
-    <div>
-      <label class="block font-semibold">PDF File</label>
-      <input type="file" name="pdf" accept="application/pdf" required
-             class="w-full border rounded p-2"/>
+<body class="bg-slate-50 min-h-screen">
+  <div class="max-w-5xl mx-auto p-6">
+    <div class="flex items-center justify-between gap-4 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">PDF Embedder</h1>
+        <p class="text-slate-600 text-sm">Embed a file into a PDF, then verify what’s inside.</p>
+      </div>
+      <div class="text-xs text-slate-500">
+        <span class="inline-flex items-center gap-2 bg-white border rounded-full px-3 py-1">
+          <span class="w-2 h-2 rounded-full bg-green-500"></span>
+          Local app on <span class="font-mono">:8080</span>
+        </span>
+      </div>
     </div>
 
-    <div>
-      <label class="block font-semibold">Image / Excel / Any File</label>
-      <input type="file" name="extra" required
-             class="w-full border rounded p-2"/>
+    <div class="bg-white border rounded-xl shadow-sm overflow-hidden">
+      <div class="flex border-b">
+        <button id="tabEmbed" class="px-4 py-3 text-sm font-semibold border-b-2 border-blue-600 text-blue-700">
+          Embed into PDF
+        </button>
+        <button id="tabVerify" class="px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900">
+          Verify embedded files
+        </button>
+      </div>
+
+      <div id="panelEmbed" class="p-6">
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="space-y-4">
+            <h2 class="text-lg font-bold text-slate-900">1) Upload & embed</h2>
+
+            <form id="embedForm" class="space-y-4">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700">PDF</label>
+                <input type="file" name="pdf" accept="application/pdf" required
+                       class="mt-1 w-full border rounded-lg p-2 bg-white" />
+              </div>
+
+              <div>
+                <label class="block text-sm font-semibold text-slate-700">File to embed (Excel, image, anything)</label>
+                <input type="file" name="extra" required
+                       class="mt-1 w-full border rounded-lg p-2 bg-white" />
+                <p class="text-xs text-slate-500 mt-1">
+                  Images are also stamped onto page 1. All file types are attached inside the PDF.
+                </p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-semibold text-slate-700">Image stamp placement (images only)</label>
+                <select name="placement" class="mt-1 w-full border rounded-lg p-2 bg-white">
+                  <option value="top-right" selected>Top-right</option>
+                  <option value="top-left">Top-left</option>
+                  <option value="bottom-right">Bottom-right</option>
+                  <option value="bottom-left">Bottom-left</option>
+                </select>
+              </div>
+
+              <button class="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 font-semibold">
+                Embed and Download PDF
+              </button>
+            </form>
+
+            <div id="embedStatus" class="text-sm text-slate-600"></div>
+          </div>
+
+          <div class="bg-slate-50 border rounded-xl p-4">
+            <h3 class="font-bold text-slate-900 mb-2">What “embed” means</h3>
+            <ul class="text-sm text-slate-700 list-disc pl-5 space-y-1">
+              <li><span class="font-semibold">Excel/CSV/any file</span>: attached inside the PDF.</li>
+              <li><span class="font-semibold">Images</span>: attached inside the PDF <span class="italic">and</span> stamped visually onto page 1.</li>
+              <li>Use <span class="font-semibold">Verify</span> to upload the updated PDF and view/download attachments.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div id="panelVerify" class="p-6 hidden">
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="space-y-4">
+            <h2 class="text-lg font-bold text-slate-900">2) Verify & preview</h2>
+
+            <form id="verifyForm" class="space-y-4">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700">Upload PDF to inspect</label>
+                <input type="file" name="pdf" accept="application/pdf" required
+                       class="mt-1 w-full border rounded-lg p-2 bg-white" />
+              </div>
+
+              <button class="w-full bg-slate-900 text-white py-2.5 rounded-lg hover:bg-black font-semibold">
+                Verify embedded files
+              </button>
+            </form>
+
+            <div id="verifyStatus" class="text-sm text-slate-600"></div>
+
+            <div id="attachmentsBox" class="hidden">
+              <h3 class="font-bold text-slate-900 mt-4 mb-2">Embedded attachments</h3>
+              <div id="attachmentsList" class="space-y-2"></div>
+            </div>
+          </div>
+
+          <div class="bg-slate-50 border rounded-xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold text-slate-900">Preview</h3>
+              <button id="clearPreview" class="text-xs px-3 py-1 rounded-lg border bg-white hover:bg-slate-100">
+                Clear
+              </button>
+            </div>
+            <div id="previewArea" class="text-sm text-slate-700">
+              <p class="text-slate-500">Upload a PDF and click “Preview” on an attachment.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <button class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
-      Embed and Download
-    </button>
-  </form>
-
-  <div id="status" class="mt-4 text-sm text-gray-600"></div>
-</div>
+    <p class="text-xs text-slate-500 mt-4">
+      Tip: PDF “attachments” may not be visible in every viewer. Adobe Acrobat and many desktop PDF tools show them clearly.
+    </p>
+  </div>
 
 <script>
-document.getElementById("uploadForm").addEventListener("submit", async e => {
-  e.preventDefault();
-  const form = e.target;
-  const fd = new FormData(form);
+  const tabEmbed = document.getElementById("tabEmbed");
+  const tabVerify = document.getElementById("tabVerify");
+  const panelEmbed = document.getElementById("panelEmbed");
+  const panelVerify = document.getElementById("panelVerify");
 
-  document.getElementById("status").innerText = "Processing PDF...";
+  function setTab(which) {
+    const isEmbed = which === "embed";
+    panelEmbed.classList.toggle("hidden", !isEmbed);
+    panelVerify.classList.toggle("hidden", isEmbed);
 
-  const res = await fetch("/api/embed", {
-    method: "POST",
-    body: fd
-  });
+    tabEmbed.className = isEmbed
+      ? "px-4 py-3 text-sm font-semibold border-b-2 border-blue-600 text-blue-700"
+      : "px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900";
 
-  if (!res.ok) {
-    document.getElementById("status").innerText = "Error processing PDF";
-    return;
+    tabVerify.className = !isEmbed
+      ? "px-4 py-3 text-sm font-semibold border-b-2 border-slate-900 text-slate-900"
+      : "px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900";
   }
 
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  tabEmbed.addEventListener("click", () => setTab("embed"));
+  tabVerify.addEventListener("click", () => setTab("verify"));
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "updated.pdf";
-  a.click();
+  const embedForm = document.getElementById("embedForm");
+  const embedStatus = document.getElementById("embedStatus");
 
-  document.getElementById("status").innerText = "Download ready.";
-});
+  embedForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    embedStatus.textContent = "Embedding...";
+    const fd = new FormData(embedForm);
+
+    const res = await fetch("/api/embed", { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = "Error embedding into PDF.";
+      try { msg = (await res.json()).error || msg; } catch {}
+      embedStatus.textContent = msg;
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "updated.pdf";
+    a.click();
+
+    embedStatus.textContent = "Done. Updated PDF downloaded.";
+  });
+
+  const verifyForm = document.getElementById("verifyForm");
+  const verifyStatus = document.getElementById("verifyStatus");
+  const attachmentsBox = document.getElementById("attachmentsBox");
+  const attachmentsList = document.getElementById("attachmentsList");
+  const previewArea = document.getElementById("previewArea");
+  const clearPreview = document.getElementById("clearPreview");
+
+  let currentToken = null;
+
+  function esc(s) {
+    return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+  function setPreviewLoading() {
+    previewArea.innerHTML = '<div class="text-slate-500">Loading preview...</div>';
+  }
+  function setPreviewMessage(msg) {
+    previewArea.innerHTML = `<div class="text-slate-600">${esc(msg)}</div>`;
+  }
+
+  clearPreview.addEventListener("click", () => {
+    previewArea.innerHTML = '<p class="text-slate-500">Upload a PDF and click “Preview” on an attachment.</p>';
+  });
+
+  async function downloadAttachment(name) {
+    const url = `/api/verify/attachment?token=${encodeURIComponent(currentToken)}&name=${encodeURIComponent(name)}`;
+    const res = await fetch(url);
+    if (!res.ok) { setPreviewMessage("Download failed."); return; }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+  }
+
+  async function previewAttachment(name) {
+    setPreviewLoading();
+    const url = `/api/verify/preview?token=${encodeURIComponent(currentToken)}&name=${encodeURIComponent(name)}`;
+    const res = await fetch(url);
+    if (!res.ok) { setPreviewMessage("Preview failed."); return; }
+    const data = await res.json();
+
+    if (data.type === "image") {
+      previewArea.innerHTML = `
+        <div class="space-y-2">
+          <div class="text-xs text-slate-500">${esc(name)} (${esc(data.mime || "")})</div>
+          <img src="${data.dataUrl}" class="max-w-full rounded-lg border bg-white" />
+        </div>
+      `;
+      return;
+    }
+
+    if (data.type === "table") {
+      const rows = data.rows || [];
+      if (!rows.length) { setPreviewMessage("No rows to display."); return; }
+
+      const header = rows[0];
+      const body = rows.slice(1);
+
+      const ths = header.map(h => `<th class="text-left text-xs font-semibold text-slate-700 px-2 py-1 border-b bg-white sticky top-0">${esc(h)}</th>`).join("");
+      const trs = body.map(r => {
+        const tds = r.map(c => `<td class="text-xs text-slate-700 px-2 py-1 border-b align-top">${esc(c)}</td>`).join("");
+        return `<tr>${tds}</tr>`;
+      }).join("");
+
+      previewArea.innerHTML = `
+        <div class="space-y-2">
+          <div class="text-xs text-slate-500">Sheet: ${esc(data.sheet || "")}</div>
+          <div class="border rounded-lg overflow-auto max-h-[420px] bg-white">
+            <table class="min-w-full">
+              <thead><tr>${ths}</tr></thead>
+              <tbody>${trs}</tbody>
+            </table>
+          </div>
+          <div class="text-xs text-slate-500">Showing first ~50 rows.</div>
+        </div>
+      `;
+      return;
+    }
+
+    if (data.type === "info") {
+      previewArea.innerHTML = `
+        <div class="space-y-2">
+          <div class="font-semibold">${esc(data.name || name)}</div>
+          <div class="text-xs text-slate-600">${esc(data.mime || "")} • ${esc(data.size || "")} bytes</div>
+          <div class="text-sm text-slate-700">${esc(data.message || "No preview available.")}</div>
+        </div>
+      `;
+      return;
+    }
+
+    setPreviewMessage(data.message || "Unknown preview response.");
+  }
+
+  verifyForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    verifyStatus.textContent = "Inspecting PDF...";
+    attachmentsBox.classList.add("hidden");
+    attachmentsList.innerHTML = "";
+    currentToken = null;
+
+    const fd = new FormData(verifyForm);
+    const res = await fetch("/api/verify", { method: "POST", body: fd });
+
+    if (!res.ok) {
+      let msg = "Error verifying PDF.";
+      try { msg = (await res.json()).error || msg; } catch {}
+      verifyStatus.textContent = msg;
+      return;
+    }
+
+    const data = await res.json();
+    currentToken = data.token;
+    const items = data.attachments || [];
+    verifyStatus.textContent = `Found ${items.length} embedded attachment(s).`;
+
+    if (!items.length) { attachmentsBox.classList.add("hidden"); return; }
+
+    attachmentsBox.classList.remove("hidden");
+    items.forEach(item => {
+      const div = document.createElement("div");
+      div.className = "border rounded-lg bg-white p-3 flex items-center justify-between gap-3";
+
+      div.innerHTML = `
+        <div class="min-w-0">
+          <div class="font-semibold text-slate-900 truncate">${esc(item.name)}</div>
+          <div class="text-xs text-slate-500">${esc(item.mime)} • ${esc(item.size)} bytes</div>
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" data-action="preview">Preview</button>
+          <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" data-action="download">Download</button>
+        </div>
+      `;
+
+      div.querySelector('[data-action="preview"]').addEventListener("click", () => previewAttachment(item.name));
+      div.querySelector('[data-action="download"]').addEventListener("click", () => downloadAttachment(item.name));
+      attachmentsList.appendChild(div);
+    });
+  });
 </script>
 </body>
 </html>
