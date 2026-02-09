@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PDF Embedder + Verify</title>
+  <title>PDF Embedder + Verify + Extract</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 min-h-screen">
-  <div class="max-w-5xl mx-auto p-6">
+  <div class="max-w-6xl mx-auto p-6">
     <div class="flex items-center justify-between gap-4 mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-slate-900">PDF Embedder</h1>
-        <p class="text-slate-600 text-sm">Embed a file into a PDF, then verify what’s inside.</p>
+        <h1 class="text-2xl font-bold text-slate-900">PDF Tools</h1>
+        <p class="text-slate-600 text-sm">Embed a file into a PDF, verify attachments, and extract images + EXIF.</p>
       </div>
       <div class="text-xs text-slate-500">
         <span class="inline-flex items-center gap-2 bg-white border rounded-full px-3 py-1">
@@ -22,17 +22,21 @@
     </div>
 
     <div class="bg-white border rounded-xl shadow-sm overflow-hidden">
-      <div class="flex border-b">
-        <button id="tabEmbed" class="px-4 py-3 text-sm font-semibold border-b-2 border-blue-600 text-blue-700">
+      <div class="flex border-b overflow-auto">
+        <button id="tabEmbed" class="px-4 py-3 text-sm font-semibold border-b-2 border-blue-600 text-blue-700 whitespace-nowrap">
           Embed into PDF
         </button>
-        <button id="tabVerify" class="px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900">
+        <button id="tabVerify" class="px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap">
           Verify embedded files
+        </button>
+        <button id="tabExtract" class="px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap">
+          Extract images & EXIF
         </button>
       </div>
 
+      <!-- Embed Panel -->
       <div id="panelEmbed" class="p-6">
-        <div class="grid md:grid-cols-2 gap-6">
+        <div class="grid lg:grid-cols-2 gap-6">
           <div class="space-y-4">
             <h2 class="text-lg font-bold text-slate-900">1) Upload & embed</h2>
 
@@ -73,18 +77,20 @@
           <div class="bg-slate-50 border rounded-xl p-4">
             <h3 class="font-bold text-slate-900 mb-2">What “embed” means</h3>
             <ul class="text-sm text-slate-700 list-disc pl-5 space-y-1">
-              <li><span class="font-semibold">Excel/CSV/any file</span>: attached inside the PDF.</li>
-              <li><span class="font-semibold">Images</span>: attached inside the PDF <span class="italic">and</span> stamped visually onto page 1.</li>
-              <li>Use <span class="font-semibold">Verify</span> to upload the updated PDF and view/download attachments.</li>
+              <li><span class="font-semibold">Excel/CSV/any file</span>: attached inside the PDF (EmbeddedFiles).</li>
+              <li><span class="font-semibold">Images</span>: attached + stamped onto page 1.</li>
+              <li>Use <span class="font-semibold">Verify</span> to list/preview attachments.</li>
+              <li>Use <span class="font-semibold">Extract</span> to pull out page images and inspect EXIF (when present).</li>
             </ul>
           </div>
         </div>
       </div>
 
+      <!-- Verify Panel -->
       <div id="panelVerify" class="p-6 hidden">
-        <div class="grid md:grid-cols-2 gap-6">
+        <div class="grid lg:grid-cols-2 gap-6">
           <div class="space-y-4">
-            <h2 class="text-lg font-bold text-slate-900">2) Verify & preview</h2>
+            <h2 class="text-lg font-bold text-slate-900">2) Verify & preview attachments</h2>
 
             <form id="verifyForm" class="space-y-4">
               <div>
@@ -119,44 +125,92 @@
           </div>
         </div>
       </div>
+
+      <!-- Extract Panel -->
+      <div id="panelExtract" class="p-6 hidden">
+        <div class="grid lg:grid-cols-2 gap-6">
+          <div class="space-y-4">
+            <h2 class="text-lg font-bold text-slate-900">3) Extract images & EXIF</h2>
+
+            <form id="extractForm" class="space-y-4">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700">Upload PDF to extract from</label>
+                <input type="file" name="pdf" accept="application/pdf" required
+                       class="mt-1 w-full border rounded-lg p-2 bg-white" />
+              </div>
+
+              <button class="w-full bg-emerald-600 text-white py-2.5 rounded-lg hover:bg-emerald-700 font-semibold">
+                Extract images + metadata
+              </button>
+            </form>
+
+            <div id="extractStatus" class="text-sm text-slate-600"></div>
+
+            <div id="pdfMetaBox" class="hidden">
+              <h3 class="font-bold text-slate-900 mt-4 mb-2">PDF metadata</h3>
+              <pre id="pdfMeta" class="text-xs bg-white border rounded-lg p-3 overflow-auto max-h-48"></pre>
+            </div>
+
+            <div id="imagesBox" class="hidden">
+              <h3 class="font-bold text-slate-900 mt-4 mb-2">Extracted images</h3>
+              <div id="imagesList" class="space-y-2"></div>
+            </div>
+          </div>
+
+          <div class="bg-slate-50 border rounded-xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold text-slate-900">Image preview + EXIF</h3>
+              <button id="clearExtractPreview" class="text-xs px-3 py-1 rounded-lg border bg-white hover:bg-slate-100">
+                Clear
+              </button>
+            </div>
+            <div id="extractPreviewArea" class="text-sm text-slate-700">
+              <p class="text-slate-500">Extract, then click “Preview” on an image.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <p class="text-xs text-slate-500 mt-4">
-      Tip: PDF “attachments” may not be visible in every viewer. Adobe Acrobat and many desktop PDF tools show them clearly.
+      Note: EXIF is usually present in original camera JPEGs. PDF-embedded/page images are often re-encoded, so EXIF may be empty.
     </p>
   </div>
 
 <script>
-  const tabEmbed = document.getElementById("tabEmbed");
-  const tabVerify = document.getElementById("tabVerify");
-  const panelEmbed = document.getElementById("panelEmbed");
-  const panelVerify = document.getElementById("panelVerify");
+  // Tabs
+  const tabs = {
+    embed: { btn: document.getElementById("tabEmbed"), panel: document.getElementById("panelEmbed") },
+    verify: { btn: document.getElementById("tabVerify"), panel: document.getElementById("panelVerify") },
+    extract:{ btn: document.getElementById("tabExtract"), panel: document.getElementById("panelExtract") },
+  };
 
-  function setTab(which) {
-    const isEmbed = which === "embed";
-    panelEmbed.classList.toggle("hidden", !isEmbed);
-    panelVerify.classList.toggle("hidden", isEmbed);
-
-    tabEmbed.className = isEmbed
-      ? "px-4 py-3 text-sm font-semibold border-b-2 border-blue-600 text-blue-700"
-      : "px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900";
-
-    tabVerify.className = !isEmbed
-      ? "px-4 py-3 text-sm font-semibold border-b-2 border-slate-900 text-slate-900"
-      : "px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900";
+  function setActive(which) {
+    Object.entries(tabs).forEach(([k, v]) => {
+      const active = k === which;
+      v.panel.classList.toggle("hidden", !active);
+      v.btn.className = active
+        ? "px-4 py-3 text-sm font-semibold border-b-2 " + (k==="embed"?"border-blue-600 text-blue-700":k==="verify"?"border-slate-900 text-slate-900":"border-emerald-600 text-emerald-700") + " whitespace-nowrap"
+        : "px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap";
+    });
   }
 
-  tabEmbed.addEventListener("click", () => setTab("embed"));
-  tabVerify.addEventListener("click", () => setTab("verify"));
+  tabs.embed.btn.addEventListener("click", () => setActive("embed"));
+  tabs.verify.btn.addEventListener("click", () => setActive("verify"));
+  tabs.extract.btn.addEventListener("click", () => setActive("extract"));
 
+  function esc(s) {
+    return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  // Embed
   const embedForm = document.getElementById("embedForm");
   const embedStatus = document.getElementById("embedStatus");
-
   embedForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     embedStatus.textContent = "Embedding...";
     const fd = new FormData(embedForm);
-
     const res = await fetch("/api/embed", { method: "POST", body: fd });
     if (!res.ok) {
       let msg = "Error embedding into PDF.";
@@ -164,42 +218,33 @@
       embedStatus.textContent = msg;
       return;
     }
-
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "updated.pdf";
     a.click();
-
     embedStatus.textContent = "Done. Updated PDF downloaded.";
   });
 
+  // Verify
   const verifyForm = document.getElementById("verifyForm");
   const verifyStatus = document.getElementById("verifyStatus");
   const attachmentsBox = document.getElementById("attachmentsBox");
   const attachmentsList = document.getElementById("attachmentsList");
   const previewArea = document.getElementById("previewArea");
   const clearPreview = document.getElementById("clearPreview");
+  let verifyToken = null;
 
-  let currentToken = null;
-
-  function esc(s) {
-    return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
-  }
-  function setPreviewLoading() {
-    previewArea.innerHTML = '<div class="text-slate-500">Loading preview...</div>';
-  }
-  function setPreviewMessage(msg) {
-    previewArea.innerHTML = `<div class="text-slate-600">${esc(msg)}</div>`;
-  }
+  function setPreviewLoading() { previewArea.innerHTML = '<div class="text-slate-500">Loading preview...</div>'; }
+  function setPreviewMessage(msg){ previewArea.innerHTML = `<div class="text-slate-600">${esc(msg)}</div>`; }
 
   clearPreview.addEventListener("click", () => {
     previewArea.innerHTML = '<p class="text-slate-500">Upload a PDF and click “Preview” on an attachment.</p>';
   });
 
   async function downloadAttachment(name) {
-    const url = `/api/verify/attachment?token=${encodeURIComponent(currentToken)}&name=${encodeURIComponent(name)}`;
+    const url = `/api/verify/attachment?token=${encodeURIComponent(verifyToken)}&name=${encodeURIComponent(name)}`;
     const res = await fetch(url);
     if (!res.ok) { setPreviewMessage("Download failed."); return; }
     const blob = await res.blob();
@@ -211,7 +256,7 @@
 
   async function previewAttachment(name) {
     setPreviewLoading();
-    const url = `/api/verify/preview?token=${encodeURIComponent(currentToken)}&name=${encodeURIComponent(name)}`;
+    const url = `/api/verify/preview?token=${encodeURIComponent(verifyToken)}&name=${encodeURIComponent(name)}`;
     const res = await fetch(url);
     if (!res.ok) { setPreviewMessage("Preview failed."); return; }
     const data = await res.json();
@@ -221,24 +266,17 @@
         <div class="space-y-2">
           <div class="text-xs text-slate-500">${esc(name)} (${esc(data.mime || "")})</div>
           <img src="${data.dataUrl}" class="max-w-full rounded-lg border bg-white" />
-        </div>
-      `;
+        </div>`;
       return;
     }
 
     if (data.type === "table") {
       const rows = data.rows || [];
       if (!rows.length) { setPreviewMessage("No rows to display."); return; }
-
       const header = rows[0];
       const body = rows.slice(1);
-
       const ths = header.map(h => `<th class="text-left text-xs font-semibold text-slate-700 px-2 py-1 border-b bg-white sticky top-0">${esc(h)}</th>`).join("");
-      const trs = body.map(r => {
-        const tds = r.map(c => `<td class="text-xs text-slate-700 px-2 py-1 border-b align-top">${esc(c)}</td>`).join("");
-        return `<tr>${tds}</tr>`;
-      }).join("");
-
+      const trs = body.map(r => `<tr>${r.map(c=>`<td class="text-xs text-slate-700 px-2 py-1 border-b align-top">${esc(c)}</td>`).join("")}</tr>`).join("");
       previewArea.innerHTML = `
         <div class="space-y-2">
           <div class="text-xs text-slate-500">Sheet: ${esc(data.sheet || "")}</div>
@@ -249,8 +287,7 @@
             </table>
           </div>
           <div class="text-xs text-slate-500">Showing first ~50 rows.</div>
-        </div>
-      `;
+        </div>`;
       return;
     }
 
@@ -260,8 +297,7 @@
           <div class="font-semibold">${esc(data.name || name)}</div>
           <div class="text-xs text-slate-600">${esc(data.mime || "")} • ${esc(data.size || "")} bytes</div>
           <div class="text-sm text-slate-700">${esc(data.message || "No preview available.")}</div>
-        </div>
-      `;
+        </div>`;
       return;
     }
 
@@ -273,11 +309,10 @@
     verifyStatus.textContent = "Inspecting PDF...";
     attachmentsBox.classList.add("hidden");
     attachmentsList.innerHTML = "";
-    currentToken = null;
+    verifyToken = null;
 
     const fd = new FormData(verifyForm);
     const res = await fetch("/api/verify", { method: "POST", body: fd });
-
     if (!res.ok) {
       let msg = "Error verifying PDF.";
       try { msg = (await res.json()).error || msg; } catch {}
@@ -286,17 +321,15 @@
     }
 
     const data = await res.json();
-    currentToken = data.token;
+    verifyToken = data.token;
     const items = data.attachments || [];
     verifyStatus.textContent = `Found ${items.length} embedded attachment(s).`;
-
     if (!items.length) { attachmentsBox.classList.add("hidden"); return; }
 
     attachmentsBox.classList.remove("hidden");
     items.forEach(item => {
       const div = document.createElement("div");
       div.className = "border rounded-lg bg-white p-3 flex items-center justify-between gap-3";
-
       div.innerHTML = `
         <div class="min-w-0">
           <div class="font-semibold text-slate-900 truncate">${esc(item.name)}</div>
@@ -305,13 +338,133 @@
         <div class="flex gap-2 shrink-0">
           <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" data-action="preview">Preview</button>
           <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" data-action="download">Download</button>
-        </div>
-      `;
-
+        </div>`;
       div.querySelector('[data-action="preview"]').addEventListener("click", () => previewAttachment(item.name));
       div.querySelector('[data-action="download"]').addEventListener("click", () => downloadAttachment(item.name));
       attachmentsList.appendChild(div);
     });
+  });
+
+  // Extract
+  const extractForm = document.getElementById("extractForm");
+  const extractStatus = document.getElementById("extractStatus");
+  const pdfMetaBox = document.getElementById("pdfMetaBox");
+  const pdfMeta = document.getElementById("pdfMeta");
+  const imagesBox = document.getElementById("imagesBox");
+  const imagesList = document.getElementById("imagesList");
+  const extractPreviewArea = document.getElementById("extractPreviewArea");
+  const clearExtractPreview = document.getElementById("clearExtractPreview");
+  let extractToken = null;
+
+  clearExtractPreview.addEventListener("click", () => {
+    extractPreviewArea.innerHTML = '<p class="text-slate-500">Extract, then click “Preview” on an image.</p>';
+  });
+
+  function setExtractPreviewLoading() {
+    extractPreviewArea.innerHTML = '<div class="text-slate-500">Loading image + EXIF...</div>';
+  }
+
+  async function previewExtractedImage(id) {
+    setExtractPreviewLoading();
+    const url = `/api/extract/image_preview?token=${encodeURIComponent(extractToken)}&id=${encodeURIComponent(id)}`;
+    const res = await fetch(url);
+    if (!res.ok) { extractPreviewArea.innerHTML = '<div class="text-slate-600">Preview failed.</div>'; return; }
+    const data = await res.json();
+    if (data.type === "error") { extractPreviewArea.innerHTML = `<div class="text-slate-600">${esc(data.message)}</div>`; return; }
+
+    const exif = data.exif || {};
+    const exifKeys = Object.keys(exif);
+
+    const exifHtml = exifKeys.length
+      ? `<div class="border rounded-lg bg-white p-3 overflow-auto max-h-56 text-xs">
+           ${exifKeys.map(k => `<div class="flex gap-2"><div class="w-40 shrink-0 text-slate-500">${esc(k)}</div><div class="text-slate-800 break-words">${esc(exif[k])}</div></div>`).join("")}
+         </div>`
+      : `<div class="text-xs text-slate-500">No EXIF found for this image.</div>`;
+
+    extractPreviewArea.innerHTML = `
+      <div class="space-y-3">
+        <div class="text-xs text-slate-500">${esc(data.name)} • page ${esc(data.page)} • ${esc(data.mime)}</div>
+        ${data.dataUrl ? `<img src="${data.dataUrl}" class="max-w-full rounded-lg border bg-white" />` : `<div class="text-slate-600">No browser preview available.</div>`}
+        <div class="flex gap-2">
+          <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" id="dlImgBtn">Download image</button>
+        </div>
+        <div>
+          <div class="font-semibold text-slate-900 mb-1">EXIF</div>
+          ${exifHtml}
+        </div>
+      </div>
+    `;
+
+    const dlBtn = document.getElementById("dlImgBtn");
+    dlBtn.addEventListener("click", async () => {
+      const dlUrl = `/api/extract/image?token=${encodeURIComponent(extractToken)}&id=${encodeURIComponent(id)}`;
+      const r = await fetch(dlUrl);
+      if (!r.ok) return;
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = data.name || "image.bin";
+      a.click();
+    });
+  }
+
+  extractForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    extractStatus.textContent = "Extracting...";
+    pdfMetaBox.classList.add("hidden");
+    imagesBox.classList.add("hidden");
+    imagesList.innerHTML = "";
+    extractToken = null;
+
+    const fd = new FormData(extractForm);
+    const res = await fetch("/api/extract", { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = "Error extracting.";
+      try { msg = (await res.json()).error || msg; } catch {}
+      extractStatus.textContent = msg;
+      return;
+    }
+
+    const data = await res.json();
+    extractToken = data.token;
+
+    // PDF metadata
+    pdfMeta.textContent = JSON.stringify(data.pdf_metadata || {}, null, 2);
+    pdfMetaBox.classList.remove("hidden");
+
+    // Images list
+    const imgs = data.images || [];
+    extractStatus.textContent = `Found ${imgs.length} image(s) in pages (plus ${data.attachment_count || 0} attachment(s)).`;
+
+    if (imgs.length) {
+      imagesBox.classList.remove("hidden");
+      imgs.forEach(im => {
+        const div = document.createElement("div");
+        div.className = "border rounded-lg bg-white p-3 flex items-center justify-between gap-3";
+        div.innerHTML = `
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-900 truncate">${esc(im.name)}</div>
+            <div class="text-xs text-slate-500">page ${esc(im.page)} • ${esc(im.mime)} • ${esc(im.size)} bytes</div>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" data-action="preview">Preview</button>
+            <button class="px-3 py-1.5 text-xs rounded-lg border bg-white hover:bg-slate-100" data-action="download">Download</button>
+          </div>
+        `;
+        div.querySelector('[data-action="preview"]').addEventListener("click", () => previewExtractedImage(im.id));
+        div.querySelector('[data-action="download"]').addEventListener("click", async () => {
+          const dlUrl = `/api/extract/image?token=${encodeURIComponent(extractToken)}&id=${encodeURIComponent(im.id)}`;
+          const r = await fetch(dlUrl);
+          if (!r.ok) return;
+          const blob = await r.blob();
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = im.name;
+          a.click();
+        });
+        imagesList.appendChild(div);
+      });
+    }
   });
 </script>
 </body>

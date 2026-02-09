@@ -4,13 +4,13 @@ import os
 import time
 import uuid
 import mimetypes
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 
 from flask import Flask, request, send_file, send_from_directory, jsonify
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-from PIL import Image
+from PIL import Image, ExifTags
 
 try:
     from openpyxl import load_workbook
@@ -22,9 +22,9 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
-# token -> {"ts": epoch_seconds, "pdf_bytes": bytes, "attachments": {name: bytes}}
-VERIFY_STORE: Dict[str, Dict[str, Any]] = {}
-VERIFY_TTL_SECONDS = int(os.getenv("VERIFY_TTL_SECONDS", "900"))  # 15 minutes default
+# token -> {"ts": epoch_seconds, "pdf_bytes": bytes, "attachments": {name: bytes}, "images": [{"id":..., "bytes":..., "mime":..., "page":...}]}
+STORE: Dict[str, Dict[str, Any]] = {}
+STORE_TTL_SECONDS = int(os.getenv("STORE_TTL_SECONDS", "900"))  # 15 minutes default
 
 
 def _too_large(content_length):
@@ -33,9 +33,14 @@ def _too_large(content_length):
 
 def _cleanup_store():
     now = time.time()
-    expired = [k for k, v in VERIFY_STORE.items() if (now - v.get("ts", now)) > VERIFY_TTL_SECONDS]
+    expired = [k for k, v in STORE.items() if (now - v.get("ts", now)) > STORE_TTL_SECONDS]
     for k in expired:
-        VERIFY_STORE.pop(k, None)
+        STORE.pop(k, None)
+
+
+def _guess_mime(filename: str) -> str:
+    mt, _ = mimetypes.guess_type(filename)
+    return mt or "application/octet-stream"
 
 
 def make_image_overlay_pdf(image_bytes, page_w, page_h, placement="top-right"):
@@ -70,8 +75,8 @@ def make_image_overlay_pdf(image_bytes, page_w, page_h, placement="top-right"):
 
 def _read_attachments(reader: PdfReader) -> Dict[str, bytes]:
     """
-    Robust extraction of embedded file attachments (a.k.a. "File Attachments").
-    Walks the PDF catalog: /Root -> /Names -> /EmbeddedFiles -> /Names.
+    Robust extraction of embedded file attachments ("File Attachments") via NameTree:
+    /Root -> /Names -> /EmbeddedFiles -> /Names
     Returns: {filename: bytes}
     """
     attachments: Dict[str, bytes] = {}
@@ -99,7 +104,6 @@ def _read_attachments(reader: PdfReader) -> Dict[str, bytes]:
         if not names_array:
             return attachments
 
-        # names_array is like: [name1, fileSpec1, name2, fileSpec2, ...]
         for i in range(0, len(names_array), 2):
             try:
                 fname_obj = names_array[i]
@@ -110,31 +114,20 @@ def _read_attachments(reader: PdfReader) -> Dict[str, bytes]:
             fname = _safe_text(fname_obj)
 
             try:
-                ef = filespec.get("/EF")
-                if not ef:
-                    continue
-                fstream = ef.get("/F")
-                if not fstream:
-                    continue
-
-                data = fstream.get_data()
-                attachments[fname] = data
+                ef = filespec.get("/EF") or {}
+                # Streams can be stored under several keys; prefer /F then fall back.
+                for key in ("/F", "/UF", "/DOS", "/Mac", "/Unix"):
+                    st = ef.get(key)
+                    if st:
+                        attachments[fname] = st.get_data()
+                        break
             except Exception:
-                # Some PDFs store the stream under /UF or other keys; try a few fallbacks
-                try:
-                    ef = filespec.get("/EF") or {}
-                    for key in ("/UF", "/F", "/DOS", "/Mac", "/Unix"):
-                        st = ef.get(key)
-                        if st:
-                            attachments[fname] = st.get_data()
-                            break
-                except Exception:
-                    pass
+                pass
 
     except Exception:
         pass
 
-    # As a last resort, try pypdf's built-in attachments property if present
+    # Last resort: pypdf's helper (varies by version/pdf structure)
     if not attachments:
         try:
             att = getattr(reader, "attachments", None)
@@ -151,11 +144,6 @@ def _read_attachments(reader: PdfReader) -> Dict[str, bytes]:
             pass
 
     return attachments
-
-
-def _guess_mime(filename: str) -> str:
-    mt, _ = mimetypes.guess_type(filename)
-    return mt or "application/octet-stream"
 
 
 def _xlsx_preview(xlsx_bytes: bytes, max_rows: int = 50, max_cols: int = 20) -> Dict[str, Any]:
@@ -188,6 +176,100 @@ def _csv_preview(csv_bytes: bytes, max_rows: int = 80) -> Dict[str, Any]:
         return {"type": "table", "sheet": "CSV", "rows": rows}
     except Exception as e:
         return {"type": "error", "message": f"CSV preview failed: {e}"}
+
+
+def _exif_to_dict(img: Image.Image) -> Dict[str, Any]:
+    """
+    Extract EXIF (if present) into a JSON-serializable dict.
+    Note: Many PDF-extracted images won't contain EXIF because they may be re-encoded.
+    """
+    out: Dict[str, Any] = {}
+    try:
+        exif = img.getexif()
+        if not exif:
+            return out
+        tag_map = ExifTags.TAGS
+        for tag_id, value in exif.items():
+            name = tag_map.get(tag_id, str(tag_id))
+            # Make sure it's JSON-friendly
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode("utf-8", errors="replace")
+                except Exception:
+                    value = base64.b64encode(value).decode("ascii")
+            out[name] = value
+    except Exception:
+        pass
+    return out
+
+
+def _extract_images_from_pdf(reader: PdfReader, max_images: int = 50) -> List[Dict[str, Any]]:
+    """
+    Extract images from PDF pages by scanning XObjects.
+    Returns a list of dicts with bytes+mime+page.
+    """
+    images: List[Dict[str, Any]] = []
+    seen = 0
+
+    for page_index, page in enumerate(reader.pages):
+        if seen >= max_images:
+            break
+        try:
+            resources = page.get("/Resources") or {}
+            xobj = resources.get("/XObject")
+            if not xobj:
+                continue
+
+            for name, obj in xobj.items():
+                if seen >= max_images:
+                    break
+                try:
+                    o = obj.get_object()
+                    if o.get("/Subtype") != "/Image":
+                        continue
+
+                    data = o.get_data()
+                    # Try to infer image type
+                    f = o.get("/Filter")
+                    mime = "application/octet-stream"
+                    ext = "bin"
+
+                    # Common cases: DCTDecode (JPEG), JPXDecode (JPEG2000), FlateDecode (often PNG-like raw)
+                    if f == "/DCTDecode":
+                        mime, ext = "image/jpeg", "jpg"
+                    elif f == "/JPXDecode":
+                        mime, ext = "image/jp2", "jp2"
+                    elif f == "/FlateDecode":
+                        # Could be raw bitmap; try opening with Pillow as-is; if fails, keep as bin
+                        mime, ext = "image/png", "png"
+
+                    img_id = f"p{page_index+1}_{seen+1}_{str(name).strip('/')}"
+                    images.append({
+                        "id": img_id,
+                        "page": page_index + 1,
+                        "name": f"{img_id}.{ext}",
+                        "mime": mime,
+                        "bytes": data,
+                    })
+                    seen += 1
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return images
+
+
+def _pdf_info(reader: PdfReader) -> Dict[str, Any]:
+    info = {}
+    try:
+        md = reader.metadata
+        if md:
+            for k, v in md.items():
+                info[str(k)] = "" if v is None else str(v)
+    except Exception:
+        pass
+    return info
 
 
 @app.get("/")
@@ -266,7 +348,7 @@ def verify():
     attachments = _read_attachments(reader)
 
     token = str(uuid.uuid4())
-    VERIFY_STORE[token] = {"ts": time.time(), "pdf_bytes": pdf_bytes, "attachments": attachments}
+    STORE[token] = {"ts": time.time(), "pdf_bytes": pdf_bytes, "attachments": attachments, "images": []}
 
     items = []
     for name, b in attachments.items():
@@ -285,10 +367,10 @@ def verify_attachment():
     token = request.args.get("token", "")
     name = request.args.get("name", "")
 
-    if not token or token not in VERIFY_STORE:
+    if not token or token not in STORE:
         return jsonify({"error": "Invalid/expired token. Re-upload PDF to verify again."}), 400
 
-    attachments = VERIFY_STORE[token].get("attachments", {})
+    attachments = STORE[token].get("attachments", {})
     if name not in attachments:
         return jsonify({"error": "Attachment not found in this PDF."}), 404
 
@@ -303,10 +385,10 @@ def verify_preview():
     token = request.args.get("token", "")
     name = request.args.get("name", "")
 
-    if not token or token not in VERIFY_STORE:
+    if not token or token not in STORE:
         return jsonify({"type": "error", "message": "Invalid/expired token. Re-upload PDF to verify again."}), 400
 
-    attachments = VERIFY_STORE[token].get("attachments", {})
+    attachments = STORE[token].get("attachments", {})
     if name not in attachments:
         return jsonify({"type": "error", "message": "Attachment not found in this PDF."}), 404
 
@@ -330,6 +412,116 @@ def verify_preview():
         "size": len(data),
         "mime": mime,
         "message": "No built-in preview for this file type. You can still download it."
+    })
+
+
+@app.post("/api/extract")
+def extract():
+    """
+    Upload a PDF, extract:
+      - PDF metadata (Info dictionary / XMP as available via pypdf)
+      - Embedded file attachments (EmbeddedFiles NameTree)
+      - Inline/page images (XObject images)
+    Returns a token to download/preview extracted images and attachments.
+    """
+    _cleanup_store()
+
+    if _too_large(request.content_length):
+        return jsonify({"error": f"Upload too large (max {MAX_UPLOAD_MB} MB)."}), 413
+
+    if "pdf" not in request.files:
+        return jsonify({"error": "Missing required file: pdf"}), 400
+
+    pdf_bytes = request.files["pdf"].read()
+    if not pdf_bytes:
+        return jsonify({"error": "PDF is empty"}), 400
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    info = _pdf_info(reader)
+
+    attachments = _read_attachments(reader)
+    images = _extract_images_from_pdf(reader)
+
+    token = str(uuid.uuid4())
+    STORE[token] = {"ts": time.time(), "pdf_bytes": pdf_bytes, "attachments": attachments, "images": images}
+
+    att_list = [{"name": n, "size": len(b), "mime": _guess_mime(n)} for n, b in attachments.items()]
+    img_list = [{"id": im["id"], "name": im["name"], "page": im["page"], "mime": im["mime"], "size": len(im["bytes"])} for im in images]
+
+    return jsonify({
+        "token": token,
+        "pdf_metadata": info,
+        "attachment_count": len(att_list),
+        "attachments": sorted(att_list, key=lambda x: x["name"].lower()),
+        "image_count": len(img_list),
+        "images": img_list
+    })
+
+
+@app.get("/api/extract/image")
+def extract_image_download():
+    _cleanup_store()
+    token = request.args.get("token", "")
+    image_id = request.args.get("id", "")
+
+    if not token or token not in STORE:
+        return jsonify({"error": "Invalid/expired token. Re-upload PDF to extract again."}), 400
+
+    images = STORE[token].get("images", [])
+    hit = next((im for im in images if im.get("id") == image_id), None)
+    if not hit:
+        return jsonify({"error": "Image not found."}), 404
+
+    return send_file(io.BytesIO(hit["bytes"]), as_attachment=True, download_name=hit["name"], mimetype=hit["mime"])
+
+
+@app.get("/api/extract/image_preview")
+def extract_image_preview():
+    _cleanup_store()
+    token = request.args.get("token", "")
+    image_id = request.args.get("id", "")
+
+    if not token or token not in STORE:
+        return jsonify({"type": "error", "message": "Invalid/expired token. Re-upload PDF to extract again."}), 400
+
+    images = STORE[token].get("images", [])
+    hit = next((im for im in images if im.get("id") == image_id), None)
+    if not hit:
+        return jsonify({"type": "error", "message": "Image not found."}), 404
+
+    data = hit["bytes"]
+    mime = hit["mime"]
+
+    # Try to open in PIL and generate EXIF + a safe preview (PNG)
+    exif = {}
+    data_url = None
+    try:
+        img = Image.open(io.BytesIO(data))
+        exif = _exif_to_dict(img)
+
+        # Render a thumbnail preview as PNG to maximize browser compatibility
+        thumb = img.copy()
+        thumb.thumbnail((900, 900))
+        buf = io.BytesIO()
+        thumb.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
+    except Exception:
+        # If PIL can't open, fallback to raw bytes preview if it looks like an image
+        try:
+            b64 = base64.b64encode(data).decode("ascii")
+            data_url = f"data:{mime};base64,{b64}"
+        except Exception:
+            data_url = None
+
+    return jsonify({
+        "type": "image",
+        "id": image_id,
+        "name": hit["name"],
+        "page": hit["page"],
+        "mime": mime,
+        "exif": exif,
+        "dataUrl": data_url
     })
 
 
