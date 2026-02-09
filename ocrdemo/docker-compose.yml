@@ -23,9 +23,13 @@ services:
       - "4566:4566"
     environment:
       - SERVICES=lambda
-      - LAMBDA_EXECUTOR=local
       - EAGER_SERVICE_LOADING=1
-      - DEBUG=0
+      - DEBUG=1
+      # Force Lambda to run INSIDE this container (where tesseract is installed)
+      - LAMBDA_EXECUTOR=local
+      - LAMBDA_RUNTIME_EXECUTOR=local
+      - PROVIDER_OVERRIDE_LAMBDA=legacy
+      # CORS
       - DISABLE_CORS_CHECKS=1
       - DISABLE_CUSTOM_CORS_APIGATEWAY=1
       - EXTRA_CORS_ALLOWED_ORIGINS=http://localhost:8080,http://localhost
@@ -33,7 +37,6 @@ services:
       - ./init/setup.sh:/etc/localstack/init/ready.d/setup.sh
       - ./lambda:/etc/localstack/init/ready.d/lambda-code:ro
       - localstack_data:/var/lib/localstack
-      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 5s
