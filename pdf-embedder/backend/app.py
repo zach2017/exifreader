@@ -205,11 +205,39 @@ def _exif_to_dict(img: Image.Image) -> Dict[str, Any]:
 
 def _extract_images_from_pdf(reader: PdfReader, max_images: int = 50) -> List[Dict[str, Any]]:
     """
-    Extract images from PDF pages by scanning XObjects.
-    Returns a list of dicts with bytes+mime+page.
+    Extract images from PDF pages by scanning XObject images.
+    Produces:
+      - original_bytes + original_mime (best guess)
+      - preview_bytes as PNG when we can reconstruct (for reliable browser preview)
     """
     images: List[Dict[str, Any]] = []
     seen = 0
+
+    def _filters(o):
+        f = o.get("/Filter")
+        if f is None:
+            return []
+        if isinstance(f, list):
+            return [str(x) for x in f]
+        return [str(f)]
+
+    def _colorspace(o):
+        cs = o.get("/ColorSpace")
+        if cs is None:
+            return "/DeviceRGB"
+        try:
+            if isinstance(cs, list) and cs:
+                return str(cs[0])
+            return str(cs)
+        except Exception:
+            return "/DeviceRGB"
+
+    def _pil_mode_from_cs(cs_name: str) -> str:
+        if cs_name == "/DeviceGray":
+            return "L"
+        if cs_name == "/DeviceCMYK":
+            return "CMYK"
+        return "RGB"
 
     for page_index, page in enumerate(reader.pages):
         if seen >= max_images:
@@ -228,30 +256,96 @@ def _extract_images_from_pdf(reader: PdfReader, max_images: int = 50) -> List[Di
                     if o.get("/Subtype") != "/Image":
                         continue
 
-                    data = o.get_data()
-                    # Try to infer image type
-                    f = o.get("/Filter")
-                    mime = "application/octet-stream"
-                    ext = "bin"
+                    filters = _filters(o)
+                    w = int(o.get("/Width") or 0)
+                    h = int(o.get("/Height") or 0)
+                    bpc = int(o.get("/BitsPerComponent") or 8)
+                    cs_name = _colorspace(o)
+                    mode = _pil_mode_from_cs(cs_name)
 
-                    # Common cases: DCTDecode (JPEG), JPXDecode (JPEG2000), FlateDecode (often PNG-like raw)
-                    if f == "/DCTDecode":
-                        mime, ext = "image/jpeg", "jpg"
-                    elif f == "/JPXDecode":
-                        mime, ext = "image/jp2", "jp2"
-                    elif f == "/FlateDecode":
-                        # Could be raw bitmap; try opening with Pillow as-is; if fails, keep as bin
-                        mime, ext = "image/png", "png"
+                    data = o.get_data()
+
+                    original_mime = "application/octet-stream"
+                    original_ext = "bin"
+                    if "/DCTDecode" in filters:
+                        original_mime, original_ext = "image/jpeg", "jpg"
+                    elif "/JPXDecode" in filters:
+                        original_mime, original_ext = "image/jp2", "jp2"
+                    elif "/CCITTFaxDecode" in filters:
+                        original_mime, original_ext = "image/tiff", "tif"
 
                     img_id = f"p{page_index+1}_{seen+1}_{str(name).strip('/')}"
-                    images.append({
+                    rec: Dict[str, Any] = {
                         "id": img_id,
                         "page": page_index + 1,
-                        "name": f"{img_id}.{ext}",
-                        "mime": mime,
-                        "bytes": data,
-                    })
+                        "name": f"{img_id}.{original_ext}",
+                        "original_mime": original_mime,
+                        "original_bytes": data,
+                        "preview_mime": None,
+                        "preview_bytes": None,
+                    }
+
+                    # JPEG: browser-friendly as-is
+                    if original_mime == "image/jpeg":
+                        rec["preview_mime"] = "image/jpeg"
+                        rec["preview_bytes"] = data
+
+                    # FlateDecode or no filter: decoded raw pixels -> reconstruct
+                    elif ("/FlateDecode" in filters) or (len(filters) == 0):
+                        try:
+                            if w > 0 and h > 0 and bpc in (1, 8):
+                                if bpc == 1:
+                                    img = Image.frombytes("1", (w, h), data).convert("L")
+                                else:
+                                    channels = 1 if mode == "L" else (4 if mode == "CMYK" else 3)
+                                    expected = w * h * channels
+                                    if len(data) >= expected:
+                                        img = Image.frombytes(mode, (w, h), data[:expected])
+                                        if mode == "CMYK":
+                                            img = img.convert("RGB")
+                                    else:
+                                        img = None
+
+                                if img is not None:
+                                    buf = io.BytesIO()
+                                    img.save(buf, format="PNG")
+                                    rec["preview_mime"] = "image/png"
+                                    rec["preview_bytes"] = buf.getvalue()
+                        except Exception:
+                            pass
+
+                    # JPXDecode: try convert to PNG if Pillow supports; otherwise no preview
+                    elif original_mime == "image/jp2":
+                        try:
+                            img = Image.open(io.BytesIO(data))
+                            buf = io.BytesIO()
+                            img.save(buf, format="PNG")
+                            rec["preview_mime"] = "image/png"
+                            rec["preview_bytes"] = buf.getvalue()
+                        except Exception:
+                            rec["preview_mime"] = None
+                            rec["preview_bytes"] = None
+
+                    # Anything else: attempt Pillow open -> PNG preview
+                    else:
+                        try:
+                            img = Image.open(io.BytesIO(data))
+                            buf = io.BytesIO()
+                            img.save(buf, format="PNG")
+                            rec["preview_mime"] = "image/png"
+                            rec["preview_bytes"] = buf.getvalue()
+                        except Exception:
+                            pass
+
+                    # If we only have a PNG preview and original is opaque, set download to PNG
+                    if rec["preview_mime"] == "image/png" and rec["original_mime"] == "application/octet-stream":
+                        rec["name"] = f"{img_id}.png"
+                        rec["original_mime"] = "image/png"
+                        rec["original_bytes"] = rec["preview_bytes"] or rec["original_bytes"]
+
+                    images.append(rec)
                     seen += 1
+
                 except Exception:
                     continue
         except Exception:
@@ -446,7 +540,7 @@ def extract():
     STORE[token] = {"ts": time.time(), "pdf_bytes": pdf_bytes, "attachments": attachments, "images": images}
 
     att_list = [{"name": n, "size": len(b), "mime": _guess_mime(n)} for n, b in attachments.items()]
-    img_list = [{"id": im["id"], "name": im["name"], "page": im["page"], "mime": im["mime"], "size": len(im["bytes"])} for im in images]
+    img_list = [{"id": im["id"], "name": im["name"], "page": im["page"], "mime": im.get("original_mime"), "size": len(im.get("original_bytes") or b"")} for im in images]
 
     return jsonify({
         "token": token,
@@ -472,7 +566,7 @@ def extract_image_download():
     if not hit:
         return jsonify({"error": "Image not found."}), 404
 
-    return send_file(io.BytesIO(hit["bytes"]), as_attachment=True, download_name=hit["name"], mimetype=hit["mime"])
+    return send_file(io.BytesIO(hit.get("original_bytes") or b""), as_attachment=True, download_name=hit["name"], mimetype=(hit.get("original_mime") or "application/octet-stream"))
 
 
 @app.get("/api/extract/image_preview")
@@ -489,30 +583,29 @@ def extract_image_preview():
     if not hit:
         return jsonify({"type": "error", "message": "Image not found."}), 404
 
-    data = hit["bytes"]
-    mime = hit["mime"]
+    data = hit.get("original_bytes") or b""
+    mime = hit.get("original_mime") or "application/octet-stream"
 
-    # Try to open in PIL and generate EXIF + a safe preview (PNG)
+    # Prefer prebuilt preview bytes (PNG/JPEG) for reliable browser display
+    pbytes = hit.get("preview_bytes")
+    pmime = hit.get("preview_mime")
+
     exif = {}
     data_url = None
+
     try:
+        # EXIF is only meaningful for formats Pillow understands (usually JPEG)
         img = Image.open(io.BytesIO(data))
         exif = _exif_to_dict(img)
-
-        # Render a thumbnail preview as PNG to maximize browser compatibility
-        thumb = img.copy()
-        thumb.thumbnail((900, 900))
-        buf = io.BytesIO()
-        thumb.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        data_url = f"data:image/png;base64,{b64}"
     except Exception:
-        # If PIL can't open, fallback to raw bytes preview if it looks like an image
-        try:
-            b64 = base64.b64encode(data).decode("ascii")
-            data_url = f"data:{mime};base64,{b64}"
-        except Exception:
-            data_url = None
+        exif = {}
+
+    if pbytes and pmime:
+        b64 = base64.b64encode(pbytes).decode("ascii")
+        data_url = f"data:{pmime};base64,{b64}"
+    else:
+        # No safe preview
+        data_url = None
 
     return jsonify({
         "type": "image",
