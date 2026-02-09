@@ -42,7 +42,8 @@ pip install --quiet --no-cache-dir -t /tmp/fn \
     PyPDF2==3.0.1 \
     pytesseract==0.3.10 \
     Pillow==10.3.0 \
-    pdf2image==1.17.0
+    pdf2image==1.17.0 \
+    typing_extensions>=4.0
 cp /src/handler.py /tmp/fn/
 cd /tmp/fn && zip -r9 /tmp/function.zip . > /dev/null 2>&1
 echo "  ✓ Function zip: $(du -sh /tmp/function.zip | cut -f1)"
