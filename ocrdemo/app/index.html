@@ -15,7 +15,8 @@
                     colors: {
                         surface: { 900:'#0a0a0f', 800:'#12121a', 700:'#1a1a26', 600:'#242436' },
                         accent: { DEFAULT:'#6ee7b7', dim:'#34d399' },
-                        pdf: { DEFAULT:'#f472b6', dim:'#ec4899' }
+                        pdf: { DEFAULT:'#f472b6', dim:'#ec4899' },
+                        blue: { DEFAULT:'#60a5fa', dim:'#3b82f6' }
                     }
                 }
             }
@@ -27,32 +28,42 @@
         .drop-zone { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
         .drop-zone.dragover-img { border-color:#6ee7b7; background:rgba(110,231,183,0.05); transform:scale(1.01); }
         .drop-zone.dragover-pdf { border-color:#f472b6; background:rgba(244,114,182,0.05); transform:scale(1.01); }
+        .drop-zone.dragover-blue { border-color:#60a5fa; background:rgba(96,165,250,0.05); transform:scale(1.01); }
         .glow-green { box-shadow:0 0 0 1px rgba(110,231,183,0.1),0 0 40px rgba(110,231,183,0.03); }
         .glow-green:hover { box-shadow:0 0 0 1px rgba(110,231,183,0.2),0 0 60px rgba(110,231,183,0.06); }
         .glow-pink { box-shadow:0 0 0 1px rgba(244,114,182,0.1),0 0 40px rgba(244,114,182,0.03); }
         .glow-pink:hover { box-shadow:0 0 0 1px rgba(244,114,182,0.2),0 0 60px rgba(244,114,182,0.06); }
+        .glow-blue { box-shadow:0 0 0 1px rgba(96,165,250,0.1),0 0 40px rgba(96,165,250,0.03); }
+        .glow-blue:hover { box-shadow:0 0 0 1px rgba(96,165,250,0.2),0 0 60px rgba(96,165,250,0.06); }
         .result-card { animation: slideUp 0.5s cubic-bezier(0.4,0,0.2,1) both; }
         @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
         @keyframes pulse-green { 0%,100%{box-shadow:0 0 20px rgba(110,231,183,0.1)} 50%{box-shadow:0 0 40px rgba(110,231,183,0.25)} }
         @keyframes pulse-pink { 0%,100%{box-shadow:0 0 20px rgba(244,114,182,0.1)} 50%{box-shadow:0 0 40px rgba(244,114,182,0.25)} }
+        @keyframes pulse-blue { 0%,100%{box-shadow:0 0 20px rgba(96,165,250,0.1)} 50%{box-shadow:0 0 40px rgba(96,165,250,0.25)} }
         .processing-green { animation: pulse-green 2s ease-in-out infinite; }
         .processing-pink { animation: pulse-pink 2s ease-in-out infinite; }
+        .processing-blue { animation: pulse-blue 2s ease-in-out infinite; }
         .stat-pill-green { background:linear-gradient(135deg,rgba(110,231,183,0.08),rgba(110,231,183,0.03)); border:1px solid rgba(110,231,183,0.12); }
         .stat-pill-pink { background:linear-gradient(135deg,rgba(244,114,182,0.08),rgba(244,114,182,0.03)); border:1px solid rgba(244,114,182,0.12); }
+        .stat-pill-blue { background:linear-gradient(135deg,rgba(96,165,250,0.08),rgba(96,165,250,0.03)); border:1px solid rgba(96,165,250,0.12); }
         .text-output { scrollbar-width:thin; scrollbar-color:#34d399 transparent; }
         .text-output::-webkit-scrollbar { width:4px; }
         .text-output::-webkit-scrollbar-track { background:transparent; }
         .text-output::-webkit-scrollbar-thumb { background:#34d399; border-radius:2px; }
         .text-output-pdf::-webkit-scrollbar-thumb { background:#ec4899; }
+        .text-output-blue::-webkit-scrollbar-thumb { background:#3b82f6; }
         .preview-image { max-height:200px; object-fit:contain; }
         .scanning-line { position:absolute; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,#6ee7b7,transparent); animation:scan 2s ease-in-out infinite; }
         @keyframes scan { 0%{top:0;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{top:100%;opacity:0} }
         .tab-active-green { border-color:#6ee7b7; color:#6ee7b7; background:rgba(110,231,183,0.05); }
         .tab-active-pink { border-color:#f472b6; color:#f472b6; background:rgba(244,114,182,0.05); }
+        .tab-active-blue { border-color:#60a5fa; color:#60a5fa; background:rgba(96,165,250,0.05); }
+        .tab-inactive { border-color:rgb(55,65,81); color:rgb(107,114,128); }
         .page-row:nth-child(odd) { background:rgba(255,255,255,0.02); }
         .bar { height:6px; border-radius:3px; min-width:2px; transition:width 0.5s ease; }
         .bar-extract { background:#a78bfa; }
         .bar-ocr { background:#f472b6; }
+        .bar-text { background:#60a5fa; }
     </style>
 </head>
 <body class="min-h-screen text-gray-200 antialiased">
@@ -69,26 +80,37 @@
                 OCR <span class="text-accent">Extract</span>
             </h1>
             <p class="text-gray-500 font-light text-lg max-w-lg mx-auto">
-                Upload an image or PDF. Lambda functions extract images, run OCR, and track every millisecond.
+                Upload an image or PDF. Three Lambda functions extract text and track every millisecond.
             </p>
         </header>
 
-        <!-- Tab Switcher -->
-        <div class="flex gap-2 mb-8 justify-center">
-            <button id="tabImage" onclick="switchTab('image')" class="tab-active-green px-5 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2">
+        <!-- ═══ 3-Tab Switcher ═══ -->
+        <div class="flex gap-2 mb-8 justify-center flex-wrap">
+            <button id="tabImage" onclick="switchTab('image')" class="tab-active-green px-4 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                 Image OCR
             </button>
-            <button id="tabPdf" onclick="switchTab('pdf')" class="px-5 py-2.5 rounded-xl border border-gray-700 text-gray-500 font-medium text-sm transition-all duration-200 flex items-center gap-2 hover:text-gray-300 hover:border-gray-500">
+            <button id="tabPdfText" onclick="switchTab('pdftext')" class="tab-inactive px-4 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2 hover:text-gray-300 hover:border-gray-500">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                PDF Extract
+                PDF Text
+            </button>
+            <button id="tabPdfOcr" onclick="switchTab('pdfocr')" class="tab-inactive px-4 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2 hover:text-gray-300 hover:border-gray-500">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                PDF OCR
             </button>
         </div>
 
         <!-- ═══════════════════════════════════ -->
-        <!-- IMAGE OCR SECTION -->
+        <!-- 1. IMAGE OCR SECTION (green) -->
         <!-- ═══════════════════════════════════ -->
         <div id="sectionImage">
+            <div class="mb-6 rounded-xl border border-white/5 bg-surface-800 px-5 py-3 flex items-center justify-center gap-2 text-xs font-mono text-gray-500">
+                <span class="text-accent">Image</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="text-accent">Tesseract OCR</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="text-white">Text</span>
+            </div>
             <div class="mb-8">
                 <div id="imgDropZone" class="drop-zone glow-green relative rounded-2xl border border-dashed border-gray-700 bg-surface-800 p-12 text-center cursor-pointer transition-all duration-300 hover:border-gray-500">
                     <input type="file" id="imgFileInput" accept="image/*" class="hidden">
@@ -138,10 +160,86 @@
         </div>
 
         <!-- ═══════════════════════════════════ -->
-        <!-- PDF OCR SECTION -->
+        <!-- 2. PDF TEXT EXTRACT SECTION (blue) -->
         <!-- ═══════════════════════════════════ -->
-        <div id="sectionPdf" class="hidden">
-            <!-- Pipeline diagram -->
+        <div id="sectionPdfText" class="hidden">
+            <div class="mb-6 rounded-xl border border-white/5 bg-surface-800 px-5 py-3 flex items-center justify-center gap-2 text-xs font-mono text-gray-500">
+                <span class="text-blue">PDF</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="text-blue">PyMuPDF get_text()</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="text-white">Text</span>
+                <span class="ml-2 text-[10px] text-blue/50 border border-blue/20 rounded px-1.5 py-0.5">No OCR</span>
+            </div>
+            <div class="mb-8">
+                <div id="ptDropZone" class="drop-zone glow-blue relative rounded-2xl border border-dashed border-gray-700 bg-surface-800 p-12 text-center cursor-pointer transition-all duration-300 hover:border-gray-500">
+                    <input type="file" id="ptFileInput" accept=".pdf,application/pdf" class="hidden">
+                    <div id="ptUploadPrompt">
+                        <div class="mx-auto w-16 h-16 mb-5 rounded-2xl bg-surface-700 flex items-center justify-center">
+                            <svg class="w-7 h-7 text-blue/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        </div>
+                        <p class="text-white font-medium mb-1.5">Drop PDF here or click to browse</p>
+                        <p class="text-gray-500 text-sm">Digitally-created PDFs with selectable text — up to 50MB</p>
+                    </div>
+                    <div id="ptPreviewState" class="hidden">
+                        <div class="mx-auto w-16 h-16 mb-4 rounded-2xl bg-blue/10 border border-blue/20 flex items-center justify-center">
+                            <svg class="w-8 h-8 text-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        </div>
+                        <p id="ptFileName" class="text-white font-medium font-mono text-sm"></p>
+                        <p id="ptFileSize" class="text-gray-500 text-xs mt-1"></p>
+                    </div>
+                </div>
+                <div id="ptActionBar" class="hidden mt-4 flex gap-3">
+                    <button id="ptExtractBtn" class="flex-1 py-3.5 px-6 rounded-xl bg-blue text-surface-900 font-semibold text-sm tracking-wide hover:bg-blue-dim transition-all duration-200 flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                        Extract Text (No OCR)
+                    </button>
+                    <button id="ptClearBtn" class="py-3.5 px-5 rounded-xl border border-gray-700 text-gray-400 font-medium text-sm hover:border-gray-500 hover:text-gray-300 transition-all duration-200">Clear</button>
+                </div>
+            </div>
+            <div id="ptProcessing" class="hidden mb-8"><div class="processing-blue rounded-2xl bg-surface-800 border border-blue/20 p-8 text-center"><div class="inline-flex items-center gap-3"><svg class="w-5 h-5 text-blue animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-blue font-mono text-sm tracking-wide">Extracting embedded text…</span></div></div></div>
+            <div id="ptResults" class="hidden">
+                <div class="result-card rounded-2xl bg-surface-800 glow-blue overflow-hidden">
+                    <div class="px-6 py-4 border-b border-white/5 flex flex-wrap gap-3">
+                        <div class="stat-pill-blue rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span class="font-mono text-xs text-gray-300">Round-trip: <span id="ptStatRoundtrip" class="text-white font-medium">—</span> ms</span></div>
+                        <div class="stat-pill-blue rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span class="font-mono text-xs text-gray-300">Extract: <span id="ptStatExtract" class="text-white font-medium">—</span> ms</span></div>
+                        <div class="stat-pill-blue rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg><span class="font-mono text-xs text-gray-300"><span id="ptStatPages" class="text-white font-medium">—</span> pages</span></div>
+                        <div class="stat-pill-blue rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg><span class="font-mono text-xs text-gray-300"><span id="ptStatWords" class="text-white font-medium">—</span> words</span></div>
+                        <div class="stat-pill-blue rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg><span class="font-mono text-xs text-gray-300"><span id="ptStatChars" class="text-white font-medium">—</span> chars</span></div>
+                        <div class="stat-pill-blue rounded-lg px-3.5 py-1.5 flex items-center gap-2"><span class="font-mono text-xs text-gray-300">Size: <span id="ptStatSize" class="text-white font-medium">—</span></span></div>
+                    </div>
+                    <!-- Per-page table -->
+                    <div class="px-6 py-4 border-b border-white/5">
+                        <h3 class="text-xs font-mono text-gray-500 tracking-widest uppercase mb-3">Per-Page Breakdown</h3>
+                        <div class="rounded-lg border border-white/5 overflow-hidden">
+                            <table class="w-full text-xs font-mono">
+                                <thead><tr class="bg-surface-700 text-gray-400">
+                                    <th class="px-3 py-2 text-left w-16">Page</th>
+                                    <th class="px-3 py-2 text-left">Timing</th>
+                                    <th class="px-3 py-2 text-right w-20">Time (ms)</th>
+                                    <th class="px-3 py-2 text-right w-16">Words</th>
+                                    <th class="px-3 py-2 text-right w-16">Chars</th>
+                                </tr></thead>
+                                <tbody id="ptPageTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-xs font-mono text-gray-500 tracking-widest uppercase">Extracted Text</h3>
+                            <button onclick="copyText('ptExtractedText',this)" class="text-xs font-mono text-blue/60 hover:text-blue transition-colors flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copy</button>
+                        </div>
+                        <div id="ptExtractedText" class="text-output text-output-blue font-mono text-sm text-gray-300 leading-relaxed bg-surface-900 rounded-xl p-5 max-h-96 overflow-y-auto whitespace-pre-wrap border border-white/5"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="ptError" class="hidden mb-8"><div class="rounded-2xl bg-red-950/30 border border-red-500/20 p-6 text-center"><p class="text-red-400 font-mono text-sm" id="ptErrorMsg"></p></div></div>
+        </div>
+
+        <!-- ═══════════════════════════════════ -->
+        <!-- 3. PDF OCR SECTION (pink) -->
+        <!-- ═══════════════════════════════════ -->
+        <div id="sectionPdfOcr" class="hidden">
             <div class="mb-6 rounded-xl border border-white/5 bg-surface-800 px-5 py-3 flex items-center justify-center gap-2 text-xs font-mono text-gray-500">
                 <span class="text-pdf">PDF</span>
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -151,54 +249,47 @@
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                 <span class="text-white">Text</span>
             </div>
-
             <div class="mb-8">
-                <div id="pdfDropZone" class="drop-zone glow-pink relative rounded-2xl border border-dashed border-gray-700 bg-surface-800 p-12 text-center cursor-pointer transition-all duration-300 hover:border-gray-500">
-                    <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" class="hidden">
-                    <div id="pdfUploadPrompt">
+                <div id="poDropZone" class="drop-zone glow-pink relative rounded-2xl border border-dashed border-gray-700 bg-surface-800 p-12 text-center cursor-pointer transition-all duration-300 hover:border-gray-500">
+                    <input type="file" id="poFileInput" accept=".pdf,application/pdf" class="hidden">
+                    <div id="poUploadPrompt">
                         <div class="mx-auto w-16 h-16 mb-5 rounded-2xl bg-surface-700 flex items-center justify-center">
-                            <svg class="w-7 h-7 text-pdf/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            <svg class="w-7 h-7 text-pdf/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         </div>
                         <p class="text-white font-medium mb-1.5">Drop PDF here or click to browse</p>
-                        <p class="text-gray-500 text-sm">PDF files — up to 50MB</p>
+                        <p class="text-gray-500 text-sm">Scanned PDFs or image-based PDFs — up to 50MB</p>
                     </div>
-                    <div id="pdfPreviewState" class="hidden">
+                    <div id="poPreviewState" class="hidden">
                         <div class="mx-auto w-16 h-16 mb-4 rounded-2xl bg-pdf/10 border border-pdf/20 flex items-center justify-center">
-                            <svg class="w-8 h-8 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            <svg class="w-8 h-8 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         </div>
-                        <p id="pdfFileName" class="text-white font-medium font-mono text-sm"></p>
-                        <p id="pdfFileSize" class="text-gray-500 text-xs mt-1"></p>
+                        <p id="poFileName" class="text-white font-medium font-mono text-sm"></p>
+                        <p id="poFileSize" class="text-gray-500 text-xs mt-1"></p>
                     </div>
                 </div>
-                <div id="pdfActionBar" class="hidden mt-4 flex gap-3">
-                    <button id="pdfExtractBtn" class="flex-1 py-3.5 px-6 rounded-xl bg-pdf text-surface-900 font-semibold text-sm tracking-wide hover:bg-pdf-dim transition-all duration-200 flex items-center justify-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                <div id="poActionBar" class="hidden mt-4 flex gap-3">
+                    <button id="poExtractBtn" class="flex-1 py-3.5 px-6 rounded-xl bg-pdf text-surface-900 font-semibold text-sm tracking-wide hover:bg-pdf-dim transition-all duration-200 flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         Extract via OCR
                     </button>
-                    <button id="pdfClearBtn" class="py-3.5 px-5 rounded-xl border border-gray-700 text-gray-400 font-medium text-sm hover:border-gray-500 hover:text-gray-300 transition-all duration-200">Clear</button>
+                    <button id="poClearBtn" class="py-3.5 px-5 rounded-xl border border-gray-700 text-gray-400 font-medium text-sm hover:border-gray-500 hover:text-gray-300 transition-all duration-200">Clear</button>
                 </div>
             </div>
-
-            <div id="pdfProcessing" class="hidden mb-8"><div class="processing-pink rounded-2xl bg-surface-800 border border-pdf/20 p-8 text-center"><div class="inline-flex items-center gap-3"><svg class="w-5 h-5 text-pdf animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-pdf font-mono text-sm tracking-wide">Extracting images & running OCR…</span></div></div></div>
-
-            <div id="pdfResults" class="hidden">
+            <div id="poProcessing" class="hidden mb-8"><div class="processing-pink rounded-2xl bg-surface-800 border border-pdf/20 p-8 text-center"><div class="inline-flex items-center gap-3"><svg class="w-5 h-5 text-pdf animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-pdf font-mono text-sm tracking-wide">Extracting images & running OCR…</span></div></div></div>
+            <div id="poResults" class="hidden">
                 <div class="result-card rounded-2xl bg-surface-800 glow-pink overflow-hidden">
-
-                    <!-- Timing summary pills -->
                     <div class="px-6 py-4 border-b border-white/5 flex flex-wrap gap-3">
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span class="font-mono text-xs text-gray-300">Round-trip: <span id="pdfStatRoundtrip" class="text-white font-medium">—</span> ms</span></div>
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span class="font-mono text-xs text-gray-300">Pipeline: <span id="pdfStatPipeline" class="text-white font-medium">—</span> ms</span></div>
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14"/></svg><span class="font-mono text-xs text-gray-300">Img Extract: <span id="pdfStatExtract" class="text-white font-medium">—</span> ms</span></div>
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg><span class="font-mono text-xs text-gray-300">OCR: <span id="pdfStatOcr" class="text-white font-medium">—</span> ms</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span class="font-mono text-xs text-gray-300">Round-trip: <span id="poStatRoundtrip" class="text-white font-medium">—</span> ms</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span class="font-mono text-xs text-gray-300">Pipeline: <span id="poStatPipeline" class="text-white font-medium">—</span> ms</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14"/></svg><span class="font-mono text-xs text-gray-300">Img Extract: <span id="poStatExtract" class="text-white font-medium">—</span> ms</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg><span class="font-mono text-xs text-gray-300">OCR: <span id="poStatOcr" class="text-white font-medium">—</span> ms</span></div>
                     </div>
                     <div class="px-6 py-3 border-b border-white/5 flex flex-wrap gap-3">
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg><span class="font-mono text-xs text-gray-300"><span id="pdfStatPages" class="text-white font-medium">—</span> pages</span></div>
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg><span class="font-mono text-xs text-gray-300"><span id="pdfStatWords" class="text-white font-medium">—</span> words</span></div>
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg><span class="font-mono text-xs text-gray-300"><span id="pdfStatChars" class="text-white font-medium">—</span> chars</span></div>
-                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><span class="font-mono text-xs text-gray-300">DPI: <span id="pdfStatDpi" class="text-white font-medium">—</span></span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg><span class="font-mono text-xs text-gray-300"><span id="poStatPages" class="text-white font-medium">—</span> pages</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg><span class="font-mono text-xs text-gray-300"><span id="poStatWords" class="text-white font-medium">—</span> words</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-pdf" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg><span class="font-mono text-xs text-gray-300"><span id="poStatChars" class="text-white font-medium">—</span> chars</span></div>
+                        <div class="stat-pill-pink rounded-lg px-3.5 py-1.5 flex items-center gap-2"><span class="font-mono text-xs text-gray-300">DPI: <span id="poStatDpi" class="text-white font-medium">—</span></span></div>
                     </div>
-
-                    <!-- Per-page timing table with bars -->
                     <div class="px-6 py-4 border-b border-white/5">
                         <h3 class="text-xs font-mono text-gray-500 tracking-widest uppercase mb-3">Per-Page Breakdown</h3>
                         <div class="flex items-center gap-4 mb-3 text-[10px] font-mono text-gray-500">
@@ -215,22 +306,20 @@
                                     <th class="px-3 py-2 text-right w-16">Words</th>
                                     <th class="px-3 py-2 text-right w-16">Img</th>
                                 </tr></thead>
-                                <tbody id="pdfPageTable"></tbody>
+                                <tbody id="poPageTable"></tbody>
                             </table>
                         </div>
                     </div>
-
-                    <!-- Full extracted text -->
                     <div class="p-6">
                         <div class="flex items-center justify-between mb-3">
                             <h3 class="text-xs font-mono text-gray-500 tracking-widest uppercase">Full OCR Text</h3>
-                            <button onclick="copyText('pdfExtractedText',this)" class="text-xs font-mono text-pdf/60 hover:text-pdf transition-colors flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copy</button>
+                            <button onclick="copyText('poExtractedText',this)" class="text-xs font-mono text-pdf/60 hover:text-pdf transition-colors flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copy</button>
                         </div>
-                        <div id="pdfExtractedText" class="text-output text-output-pdf font-mono text-sm text-gray-300 leading-relaxed bg-surface-900 rounded-xl p-5 max-h-96 overflow-y-auto whitespace-pre-wrap border border-white/5"></div>
+                        <div id="poExtractedText" class="text-output text-output-pdf font-mono text-sm text-gray-300 leading-relaxed bg-surface-900 rounded-xl p-5 max-h-96 overflow-y-auto whitespace-pre-wrap border border-white/5"></div>
                     </div>
                 </div>
             </div>
-            <div id="pdfError" class="hidden mb-8"><div class="rounded-2xl bg-red-950/30 border border-red-500/20 p-6 text-center"><p class="text-red-400 font-mono text-sm" id="pdfErrorMsg"></p></div></div>
+            <div id="poError" class="hidden mb-8"><div class="rounded-2xl bg-red-950/30 border border-red-500/20 p-6 text-center"><p class="text-red-400 font-mono text-sm" id="poErrorMsg"></p></div></div>
         </div>
 
         <footer class="mt-16 text-center">
@@ -242,88 +331,86 @@
 // ========================================
 // Tab Switching
 // ========================================
-function switchTab(tab) {
-    const iT = document.getElementById('tabImage'), pT = document.getElementById('tabPdf');
-    const iS = document.getElementById('sectionImage'), pS = document.getElementById('sectionPdf');
-    if (tab === 'image') {
-        iS.classList.remove('hidden'); pS.classList.add('hidden');
-        iT.className = 'tab-active-green px-5 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2';
-        pT.className = 'px-5 py-2.5 rounded-xl border border-gray-700 text-gray-500 font-medium text-sm transition-all duration-200 flex items-center gap-2 hover:text-gray-300 hover:border-gray-500';
-    } else {
-        pS.classList.remove('hidden'); iS.classList.add('hidden');
-        pT.className = 'tab-active-pink px-5 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2';
-        iT.className = 'px-5 py-2.5 rounded-xl border border-gray-700 text-gray-500 font-medium text-sm transition-all duration-200 flex items-center gap-2 hover:text-gray-300 hover:border-gray-500';
-    }
+const TAB_CFG = {
+    image:   { tab:'tabImage',   section:'sectionImage',   cls:'tab-active-green' },
+    pdftext: { tab:'tabPdfText', section:'sectionPdfText', cls:'tab-active-blue'  },
+    pdfocr:  { tab:'tabPdfOcr',  section:'sectionPdfOcr',  cls:'tab-active-pink'  },
+};
+function switchTab(active) {
+    Object.entries(TAB_CFG).forEach(([key, cfg]) => {
+        const tabEl = document.getElementById(cfg.tab);
+        const secEl = document.getElementById(cfg.section);
+        if (key === active) {
+            secEl.classList.remove('hidden');
+            tabEl.className = cfg.cls + ' px-4 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2';
+        } else {
+            secEl.classList.add('hidden');
+            tabEl.className = 'tab-inactive px-4 py-2.5 rounded-xl border font-medium text-sm transition-all duration-200 flex items-center gap-2 hover:text-gray-300 hover:border-gray-500';
+        }
+    });
 }
 
 // ========================================
 // Utilities
 // ========================================
-function formatBytes(b) {
-    if (b < 1024) return b + ' B';
-    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-    return (b/1048576).toFixed(1) + ' MB';
-}
+function formatBytes(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
 function copyText(id, btn) {
     navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied!';
-        setTimeout(() => { btn.innerHTML = orig; }, 2000);
+        const o=btn.innerHTML; btn.innerHTML='<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied!';
+        setTimeout(()=>{btn.innerHTML=o;},2000);
     });
 }
 
-// ========================================
-// IMAGE OCR
-// ========================================
-const imgDropZone = document.getElementById('imgDropZone');
-const imgFileInput = document.getElementById('imgFileInput');
-let imgFile = null, imgBase64 = null;
+// Generic section wiring helper
+function wireSection(prefix, dropClass, fileAccept, fileValidator) {
+    const dz = document.getElementById(prefix+'DropZone');
+    const fi = document.getElementById(prefix+'FileInput');
+    let file=null, b64=null;
 
-imgDropZone.addEventListener('click', () => imgFileInput.click());
-imgDropZone.addEventListener('dragover', e => { e.preventDefault(); imgDropZone.classList.add('dragover-img'); });
-imgDropZone.addEventListener('dragleave', () => imgDropZone.classList.remove('dragover-img'));
-imgDropZone.addEventListener('drop', e => { e.preventDefault(); imgDropZone.classList.remove('dragover-img'); const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) handleImageFile(f); });
-imgFileInput.addEventListener('change', e => { if(e.target.files[0]) handleImageFile(e.target.files[0]); });
+    dz.addEventListener('click', ()=>fi.click());
+    dz.addEventListener('dragover', e=>{e.preventDefault(); dz.classList.add(dropClass);});
+    dz.addEventListener('dragleave', ()=>dz.classList.remove(dropClass));
+    dz.addEventListener('drop', e=>{e.preventDefault(); dz.classList.remove(dropClass); const f=e.dataTransfer.files[0]; if(f&&fileValidator(f)) loadFile(f);});
+    fi.addEventListener('change', e=>{if(e.target.files[0]) loadFile(e.target.files[0]);});
 
-function handleImageFile(file) {
-    imgFile = file;
-    const reader = new FileReader();
-    reader.onload = e => {
-        imgBase64 = e.target.result;
-        document.getElementById('imgPreview').src = imgBase64;
-        document.getElementById('imgFileName').textContent = file.name;
-        document.getElementById('imgFileSize').textContent = formatBytes(file.size);
-        document.getElementById('imgUploadPrompt').classList.add('hidden');
-        document.getElementById('imgPreviewState').classList.remove('hidden');
-        document.getElementById('imgActionBar').classList.remove('hidden');
-        document.getElementById('imgResults').classList.add('hidden');
-        document.getElementById('imgError').classList.add('hidden');
-    };
-    reader.readAsDataURL(file);
+    function loadFile(f) {
+        file = f;
+        const reader = new FileReader();
+        reader.onload = e => {
+            b64 = e.target.result;
+            const previewImg = document.getElementById(prefix+'Preview');
+            if (previewImg) previewImg.src = b64;
+            document.getElementById(prefix+'FileName').textContent = f.name;
+            document.getElementById(prefix+'FileSize').textContent = formatBytes(f.size);
+            document.getElementById(prefix+'UploadPrompt').classList.add('hidden');
+            document.getElementById(prefix+'PreviewState').classList.remove('hidden');
+            document.getElementById(prefix+'ActionBar').classList.remove('hidden');
+            document.getElementById(prefix+'Results').classList.add('hidden');
+            document.getElementById(prefix+'Error').classList.add('hidden');
+        };
+        reader.readAsDataURL(f);
+    }
+
+    document.getElementById(prefix+'ClearBtn').addEventListener('click', ()=>{
+        file=null; b64=null; fi.value='';
+        document.getElementById(prefix+'UploadPrompt').classList.remove('hidden');
+        document.getElementById(prefix+'PreviewState').classList.add('hidden');
+        document.getElementById(prefix+'ActionBar').classList.add('hidden');
+        document.getElementById(prefix+'Results').classList.add('hidden');
+        document.getElementById(prefix+'Error').classList.add('hidden');
+    });
+
+    return { getFile:()=>file, getB64:()=>b64 };
 }
 
-document.getElementById('imgClearBtn').addEventListener('click', () => {
-    imgFile=null; imgBase64=null; imgFileInput.value='';
-    document.getElementById('imgUploadPrompt').classList.remove('hidden');
-    document.getElementById('imgPreviewState').classList.add('hidden');
-    document.getElementById('imgActionBar').classList.add('hidden');
-    document.getElementById('imgResults').classList.add('hidden');
-    document.getElementById('imgError').classList.add('hidden');
-});
+// ========================================
+// 1. IMAGE OCR
+// ========================================
+const imgState = wireSection('img', 'dragover-img', 'image/*', f=>f.type.startsWith('image/'));
 
-/**
- * Calls the Image OCR Lambda function.
- * POST /api/ocr → Lambda ocr-service → Tesseract
- */
-async function callOcrLambda(imageBase64, filename) {
-    const r = await fetch('/api/ocr', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({image:imageBase64, filename}) });
-    if (!r.ok) throw new Error('Lambda failed ('+r.status+'): '+await r.text());
-    const d = await r.json(); if(d.error) throw new Error(d.error); return d;
-}
-
-document.getElementById('imgExtractBtn').addEventListener('click', async () => {
-    if(!imgBase64||!imgFile) return;
+document.getElementById('imgExtractBtn').addEventListener('click', async ()=>{
+    const file=imgState.getFile(), b64=imgState.getB64(); if(!b64||!file) return;
     const btn=document.getElementById('imgExtractBtn');
     btn.disabled=true; btn.classList.add('opacity-50','cursor-not-allowed');
     document.getElementById('imgProcessing').classList.remove('hidden');
@@ -332,130 +419,112 @@ document.getElementById('imgExtractBtn').addEventListener('click', async () => {
     document.getElementById('imgScanLine').classList.remove('hidden');
     try {
         const t0=performance.now();
-        const data = await callOcrLambda(imgBase64, imgFile.name);
+        const r=await fetch('/api/ocr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:b64,filename:file.name})});
+        if(!r.ok) throw new Error('Failed ('+r.status+'): '+await r.text());
+        const d=await r.json(); if(d.error) throw new Error(d.error);
         const totalMs=(performance.now()-t0).toFixed(2);
         document.getElementById('imgStatTotal').textContent=totalMs;
-        document.getElementById('imgStatOcr').textContent=data.processing_time_ms;
-        document.getElementById('imgStatWords').textContent=data.word_count;
-        document.getElementById('imgStatChars').textContent=data.text_length;
-        document.getElementById('imgExtractedText').textContent=data.text||'(No text detected)';
+        document.getElementById('imgStatOcr').textContent=d.processing_time_ms;
+        document.getElementById('imgStatWords').textContent=d.word_count;
+        document.getElementById('imgStatChars').textContent=d.text_length;
+        document.getElementById('imgExtractedText').textContent=d.text||'(No text detected)';
         document.getElementById('imgResults').classList.remove('hidden');
-    } catch(err) {
-        document.getElementById('imgErrorMsg').textContent=err.message;
-        document.getElementById('imgError').classList.remove('hidden');
-    } finally {
-        btn.disabled=false; btn.classList.remove('opacity-50','cursor-not-allowed');
-        document.getElementById('imgProcessing').classList.add('hidden');
-        document.getElementById('imgScanLine').classList.add('hidden');
-    }
+    } catch(err) { document.getElementById('imgErrorMsg').textContent=err.message; document.getElementById('imgError').classList.remove('hidden'); }
+    finally { btn.disabled=false; btn.classList.remove('opacity-50','cursor-not-allowed'); document.getElementById('imgProcessing').classList.add('hidden'); document.getElementById('imgScanLine').classList.add('hidden'); }
 });
 
 // ========================================
-// PDF → IMAGE → OCR PIPELINE
+// 2. PDF TEXT EXTRACT (no OCR)
 // ========================================
-const pdfDropZone = document.getElementById('pdfDropZone');
-const pdfFileInput = document.getElementById('pdfFileInput');
-let pdfFile = null, pdfBase64 = null;
+const ptState = wireSection('pt', 'dragover-blue', '.pdf', f=>f.type==='application/pdf'||f.name.endsWith('.pdf'));
 
-pdfDropZone.addEventListener('click', () => pdfFileInput.click());
-pdfDropZone.addEventListener('dragover', e => { e.preventDefault(); pdfDropZone.classList.add('dragover-pdf'); });
-pdfDropZone.addEventListener('dragleave', () => pdfDropZone.classList.remove('dragover-pdf'));
-pdfDropZone.addEventListener('drop', e => { e.preventDefault(); pdfDropZone.classList.remove('dragover-pdf'); const f=e.dataTransfer.files[0]; if(f&&(f.type==='application/pdf'||f.name.endsWith('.pdf'))) handlePdfFile(f); });
-pdfFileInput.addEventListener('change', e => { if(e.target.files[0]) handlePdfFile(e.target.files[0]); });
-
-function handlePdfFile(file) {
-    pdfFile = file;
-    const reader = new FileReader();
-    reader.onload = e => {
-        pdfBase64 = e.target.result;
-        document.getElementById('pdfFileName').textContent = file.name;
-        document.getElementById('pdfFileSize').textContent = formatBytes(file.size);
-        document.getElementById('pdfUploadPrompt').classList.add('hidden');
-        document.getElementById('pdfPreviewState').classList.remove('hidden');
-        document.getElementById('pdfActionBar').classList.remove('hidden');
-        document.getElementById('pdfResults').classList.add('hidden');
-        document.getElementById('pdfError').classList.add('hidden');
-    };
-    reader.readAsDataURL(file);
-}
-
-document.getElementById('pdfClearBtn').addEventListener('click', () => {
-    pdfFile=null; pdfBase64=null; pdfFileInput.value='';
-    document.getElementById('pdfUploadPrompt').classList.remove('hidden');
-    document.getElementById('pdfPreviewState').classList.add('hidden');
-    document.getElementById('pdfActionBar').classList.add('hidden');
-    document.getElementById('pdfResults').classList.add('hidden');
-    document.getElementById('pdfError').classList.add('hidden');
-});
-
-/**
- * Calls the PDF OCR Lambda pipeline.
- * POST /api/pdf-ocr → Lambda pdf-ocr
- *   → PyMuPDF renders each page as image
- *   → Tesseract OCRs each image
- *   → Returns combined text + per-page timing
- */
-async function callPdfOcrLambda(pdfBase64, filename) {
-    const r = await fetch('/api/pdf-ocr', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pdf:pdfBase64, filename}) });
-    if (!r.ok) throw new Error('Lambda failed ('+r.status+'): '+await r.text());
-    const d = await r.json(); if(d.error) throw new Error(d.error); return d;
-}
-
-document.getElementById('pdfExtractBtn').addEventListener('click', async () => {
-    if(!pdfBase64||!pdfFile) return;
-    const btn=document.getElementById('pdfExtractBtn');
+document.getElementById('ptExtractBtn').addEventListener('click', async ()=>{
+    const file=ptState.getFile(), b64=ptState.getB64(); if(!b64||!file) return;
+    const btn=document.getElementById('ptExtractBtn');
     btn.disabled=true; btn.classList.add('opacity-50','cursor-not-allowed');
-    document.getElementById('pdfProcessing').classList.remove('hidden');
-    document.getElementById('pdfResults').classList.add('hidden');
-    document.getElementById('pdfError').classList.add('hidden');
+    document.getElementById('ptProcessing').classList.remove('hidden');
+    document.getElementById('ptResults').classList.add('hidden');
+    document.getElementById('ptError').classList.add('hidden');
     try {
         const t0=performance.now();
-        const data = await callPdfOcrLambda(pdfBase64, pdfFile.name);
-        const roundtripMs=(performance.now()-t0).toFixed(2);
+        const r=await fetch('/api/pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pdf:b64,filename:file.name})});
+        if(!r.ok) throw new Error('Failed ('+r.status+'): '+await r.text());
+        const d=await r.json(); if(d.error) throw new Error(d.error);
+        const totalMs=(performance.now()-t0).toFixed(2);
+        document.getElementById('ptStatRoundtrip').textContent=totalMs;
+        document.getElementById('ptStatExtract').textContent=d.processing_time_ms;
+        document.getElementById('ptStatPages').textContent=d.page_count;
+        document.getElementById('ptStatWords').textContent=d.total_word_count;
+        document.getElementById('ptStatChars').textContent=d.total_char_count;
+        document.getElementById('ptStatSize').textContent=formatBytes(d.file_size_bytes);
+        document.getElementById('ptExtractedText').textContent=d.text||'(No text found — try PDF OCR tab for scanned documents)';
 
-        const timing = data.timing || {};
-        document.getElementById('pdfStatRoundtrip').textContent = roundtripMs;
-        document.getElementById('pdfStatPipeline').textContent = timing.pipeline_ms || '—';
-        document.getElementById('pdfStatExtract').textContent = timing.total_image_extract_ms || '—';
-        document.getElementById('pdfStatOcr').textContent = timing.total_ocr_ms || '—';
-        document.getElementById('pdfStatPages').textContent = data.page_count;
-        document.getElementById('pdfStatWords').textContent = data.total_word_count;
-        document.getElementById('pdfStatChars').textContent = data.total_char_count;
-        document.getElementById('pdfStatDpi').textContent = data.dpi || 300;
-        document.getElementById('pdfExtractedText').textContent = data.text || '(No text detected)';
-
-        // Build per-page table with timing bars
-        const tbody = document.getElementById('pdfPageTable');
-        tbody.innerHTML = '';
-        const pages = data.pages || [];
-        const maxTime = Math.max(...pages.map(p => p.image_extract_ms + p.ocr_ms), 1);
-
-        pages.forEach(p => {
-            const extractPct = Math.max((p.image_extract_ms / maxTime) * 100, 1);
-            const ocrPct = Math.max((p.ocr_ms / maxTime) * 100, 1);
-            const tr = document.createElement('tr');
-            tr.className = 'page-row text-gray-300 border-t border-white/5';
-            tr.innerHTML =
-                '<td class="px-3 py-2.5 text-left text-gray-400">' + p.page + '</td>' +
-                '<td class="px-3 py-2.5"><div class="flex gap-0.5">' +
-                    '<div class="bar bar-extract" style="width:'+extractPct+'%"></div>' +
-                    '<div class="bar bar-ocr" style="width:'+ocrPct+'%"></div>' +
-                '</div></td>' +
-                '<td class="px-3 py-2.5 text-right text-purple-400">' + p.image_extract_ms + '</td>' +
-                '<td class="px-3 py-2.5 text-right text-pdf">' + p.ocr_ms + '</td>' +
-                '<td class="px-3 py-2.5 text-right">' + p.word_count + '</td>' +
-                '<td class="px-3 py-2.5 text-right text-gray-500">' + formatBytes(p.image_size_bytes) + '</td>';
+        // Per-page table
+        const tbody=document.getElementById('ptPageTable'); tbody.innerHTML='';
+        const pages=d.pages||[];
+        const maxT=Math.max(...pages.map(p=>p.extraction_time_ms),0.01);
+        pages.forEach(p=>{
+            const pct=Math.max((p.extraction_time_ms/maxT)*100,1);
+            const tr=document.createElement('tr'); tr.className='page-row text-gray-300 border-t border-white/5';
+            tr.innerHTML='<td class="px-3 py-2.5 text-left text-gray-400">'+p.page+'</td>'+
+                '<td class="px-3 py-2.5"><div class="bar bar-text" style="width:'+pct+'%"></div></td>'+
+                '<td class="px-3 py-2.5 text-right text-blue">'+p.extraction_time_ms+'</td>'+
+                '<td class="px-3 py-2.5 text-right">'+p.word_count+'</td>'+
+                '<td class="px-3 py-2.5 text-right">'+p.char_count+'</td>';
             tbody.appendChild(tr);
         });
+        document.getElementById('ptResults').classList.remove('hidden');
+    } catch(err) { document.getElementById('ptErrorMsg').textContent=err.message; document.getElementById('ptError').classList.remove('hidden'); }
+    finally { btn.disabled=false; btn.classList.remove('opacity-50','cursor-not-allowed'); document.getElementById('ptProcessing').classList.add('hidden'); }
+});
 
-        document.getElementById('pdfResults').classList.remove('hidden');
-    } catch(err) {
-        document.getElementById('pdfErrorMsg').textContent = err.message;
-        document.getElementById('pdfError').classList.remove('hidden');
-    } finally {
-        btn.disabled=false; btn.classList.remove('opacity-50','cursor-not-allowed');
-        document.getElementById('pdfProcessing').classList.add('hidden');
-    }
+// ========================================
+// 3. PDF → IMAGE → OCR
+// ========================================
+const poState = wireSection('po', 'dragover-pdf', '.pdf', f=>f.type==='application/pdf'||f.name.endsWith('.pdf'));
+
+document.getElementById('poExtractBtn').addEventListener('click', async ()=>{
+    const file=poState.getFile(), b64=poState.getB64(); if(!b64||!file) return;
+    const btn=document.getElementById('poExtractBtn');
+    btn.disabled=true; btn.classList.add('opacity-50','cursor-not-allowed');
+    document.getElementById('poProcessing').classList.remove('hidden');
+    document.getElementById('poResults').classList.add('hidden');
+    document.getElementById('poError').classList.add('hidden');
+    try {
+        const t0=performance.now();
+        const r=await fetch('/api/pdf-ocr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pdf:b64,filename:file.name})});
+        if(!r.ok) throw new Error('Failed ('+r.status+'): '+await r.text());
+        const d=await r.json(); if(d.error) throw new Error(d.error);
+        const roundtripMs=(performance.now()-t0).toFixed(2);
+        const t=d.timing||{};
+        document.getElementById('poStatRoundtrip').textContent=roundtripMs;
+        document.getElementById('poStatPipeline').textContent=t.pipeline_ms||'—';
+        document.getElementById('poStatExtract').textContent=t.total_image_extract_ms||'—';
+        document.getElementById('poStatOcr').textContent=t.total_ocr_ms||'—';
+        document.getElementById('poStatPages').textContent=d.page_count;
+        document.getElementById('poStatWords').textContent=d.total_word_count;
+        document.getElementById('poStatChars').textContent=d.total_char_count;
+        document.getElementById('poStatDpi').textContent=d.dpi||300;
+        document.getElementById('poExtractedText').textContent=d.text||'(No text detected)';
+
+        const tbody=document.getElementById('poPageTable'); tbody.innerHTML='';
+        const pages=d.pages||[];
+        const maxT=Math.max(...pages.map(p=>p.image_extract_ms+p.ocr_ms),1);
+        pages.forEach(p=>{
+            const ePct=Math.max((p.image_extract_ms/maxT)*100,1);
+            const oPct=Math.max((p.ocr_ms/maxT)*100,1);
+            const tr=document.createElement('tr'); tr.className='page-row text-gray-300 border-t border-white/5';
+            tr.innerHTML='<td class="px-3 py-2.5 text-left text-gray-400">'+p.page+'</td>'+
+                '<td class="px-3 py-2.5"><div class="flex gap-0.5"><div class="bar bar-extract" style="width:'+ePct+'%"></div><div class="bar bar-ocr" style="width:'+oPct+'%"></div></div></td>'+
+                '<td class="px-3 py-2.5 text-right text-purple-400">'+p.image_extract_ms+'</td>'+
+                '<td class="px-3 py-2.5 text-right text-pdf">'+p.ocr_ms+'</td>'+
+                '<td class="px-3 py-2.5 text-right">'+p.word_count+'</td>'+
+                '<td class="px-3 py-2.5 text-right text-gray-500">'+formatBytes(p.image_size_bytes)+'</td>';
+            tbody.appendChild(tr);
+        });
+        document.getElementById('poResults').classList.remove('hidden');
+    } catch(err) { document.getElementById('poErrorMsg').textContent=err.message; document.getElementById('poError').classList.remove('hidden'); }
+    finally { btn.disabled=false; btn.classList.remove('opacity-50','cursor-not-allowed'); document.getElementById('poProcessing').classList.add('hidden'); }
 });
 </script>
 </body>
