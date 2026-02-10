@@ -16,68 +16,41 @@
                         mono: ['JetBrains Mono', 'monospace'],
                     },
                     colors: {
-                        surface: {
-                            900: '#0a0a0f',
-                            800: '#12121a',
-                            700: '#1a1a26',
-                            600: '#242436',
-                        },
-                        accent: {
-                            DEFAULT: '#6ee7b7',
-                            dim: '#34d399',
-                            glow: 'rgba(110, 231, 183, 0.15)',
-                        }
+                        surface: { 900: '#0a0a0f', 800: '#12121a', 700: '#1a1a26', 600: '#242436' },
+                        accent: { DEFAULT: '#6ee7b7', dim: '#34d399', glow: 'rgba(110, 231, 183, 0.15)' }
                     }
                 }
             }
         }
     </script>
     <style>
-        body {
-            font-family: 'Outfit', sans-serif;
-            background: #0a0a0f;
-        }
+        body { font-family: 'Outfit', sans-serif; background: #0a0a0f; }
         .grain-overlay {
             position: fixed; inset: 0; z-index: 0; opacity: 0.03; pointer-events: none;
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
         }
         .drop-zone { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        .drop-zone.dragover {
-            border-color: #6ee7b7;
-            background: rgba(110, 231, 183, 0.05);
-            transform: scale(1.01);
-        }
-        .glow-border {
-            box-shadow: 0 0 0 1px rgba(110, 231, 183, 0.1), 0 0 40px rgba(110, 231, 183, 0.03);
-        }
-        .glow-border:hover {
-            box-shadow: 0 0 0 1px rgba(110, 231, 183, 0.2), 0 0 60px rgba(110, 231, 183, 0.06);
-        }
+        .drop-zone.dragover { border-color: #6ee7b7; background: rgba(110, 231, 183, 0.05); transform: scale(1.01); }
+        .glow-border { box-shadow: 0 0 0 1px rgba(110, 231, 183, 0.1), 0 0 40px rgba(110, 231, 183, 0.03); }
+        .glow-border:hover { box-shadow: 0 0 0 1px rgba(110, 231, 183, 0.2), 0 0 60px rgba(110, 231, 183, 0.06); }
         .result-card { animation: slideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both; }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px rgba(110, 231, 183, 0.1); } 50% { box-shadow: 0 0 40px rgba(110, 231, 183, 0.25); } }
         .processing { animation: pulse-glow 2s ease-in-out infinite; }
-        .stat-pill {
-            background: linear-gradient(135deg, rgba(110, 231, 183, 0.08), rgba(110, 231, 183, 0.03));
-            border: 1px solid rgba(110, 231, 183, 0.12);
-        }
+        .stat-pill { background: linear-gradient(135deg, rgba(110, 231, 183, 0.08), rgba(110, 231, 183, 0.03)); border: 1px solid rgba(110, 231, 183, 0.12); }
         .text-output { scrollbar-width: thin; scrollbar-color: #34d399 transparent; }
         .text-output::-webkit-scrollbar { width: 4px; }
         .text-output::-webkit-scrollbar-track { background: transparent; }
         .text-output::-webkit-scrollbar-thumb { background: #34d399; border-radius: 2px; }
         .preview-image { max-height: 200px; object-fit: contain; }
-        .scanning-line {
-            position: absolute; left: 0; right: 0; height: 2px;
-            background: linear-gradient(90deg, transparent, #6ee7b7, transparent);
-            animation: scan 2s ease-in-out infinite;
-        }
+        .scanning-line { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, #6ee7b7, transparent); animation: scan 2s ease-in-out infinite; }
         @keyframes scan { 0% { top: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
     </style>
 </head>
 <body class="min-h-screen text-gray-200 antialiased">
     <div class="grain-overlay"></div>
-
     <div class="relative z-10 max-w-3xl mx-auto px-6 py-16">
+
         <!-- Header -->
         <header class="mb-14 text-center">
             <div class="inline-flex items-center gap-2 px-3 py-1 mb-6 rounded-full text-xs font-mono text-accent border border-accent/20 bg-accent/5 tracking-wider uppercase">
@@ -88,7 +61,7 @@
                 OCR <span class="text-accent">Extract</span>
             </h1>
             <p class="text-gray-500 font-light text-lg max-w-md mx-auto">
-                Upload an image. A LocalStack Lambda function extracts every word.
+                Upload an image. A Lambda function powered by Tesseract extracts every word.
             </p>
         </header>
 
@@ -105,7 +78,6 @@
                     <p class="text-white font-medium mb-1.5">Drop image here or click to browse</p>
                     <p class="text-gray-500 text-sm">PNG, JPG, TIFF, BMP — up to 20MB</p>
                 </div>
-                <!-- Preview State -->
                 <div id="previewState" class="hidden">
                     <div class="relative inline-block rounded-lg overflow-hidden mb-4">
                         <img id="previewImage" class="preview-image rounded-lg" alt="Preview">
@@ -115,8 +87,6 @@
                     <p id="fileSize" class="text-gray-500 text-xs mt-1"></p>
                 </div>
             </div>
-
-            <!-- Action Buttons -->
             <div id="actionBar" class="hidden mt-4 flex gap-3">
                 <button id="extractBtn" class="flex-1 py-3.5 px-6 rounded-xl bg-accent text-surface-900 font-semibold text-sm tracking-wide hover:bg-accent-dim transition-all duration-200 flex items-center justify-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,13 +94,11 @@
                     </svg>
                     Extract Text
                 </button>
-                <button id="clearBtn" class="py-3.5 px-5 rounded-xl border border-gray-700 text-gray-400 font-medium text-sm hover:border-gray-500 hover:text-gray-300 transition-all duration-200">
-                    Clear
-                </button>
+                <button id="clearBtn" class="py-3.5 px-5 rounded-xl border border-gray-700 text-gray-400 font-medium text-sm hover:border-gray-500 hover:text-gray-300 transition-all duration-200">Clear</button>
             </div>
         </div>
 
-        <!-- Processing Indicator -->
+        <!-- Processing -->
         <div id="processing" class="hidden mb-8">
             <div class="processing rounded-2xl bg-surface-800 border border-accent/20 p-8 text-center">
                 <div class="inline-flex items-center gap-3">
@@ -149,19 +117,19 @@
                 <div class="px-6 py-4 border-b border-white/5 flex flex-wrap gap-3">
                     <div class="stat-pill rounded-lg px-3.5 py-1.5 flex items-center gap-2">
                         <svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                        <span class="font-mono text-xs text-gray-300">Total: <span id="statTotalTime">—</span> ms</span>
+                        <span class="font-mono text-xs text-gray-300">Total: <span id="statTotalTime" class="text-white font-medium">—</span> ms</span>
                     </div>
                     <div class="stat-pill rounded-lg px-3.5 py-1.5 flex items-center gap-2">
                         <svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        <span class="font-mono text-xs text-gray-300">OCR: <span id="statOcrTime">—</span> ms</span>
+                        <span class="font-mono text-xs text-gray-300">OCR: <span id="statOcrTime" class="text-white font-medium">—</span> ms</span>
                     </div>
                     <div class="stat-pill rounded-lg px-3.5 py-1.5 flex items-center gap-2">
                         <svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-                        <span class="font-mono text-xs text-gray-300"><span id="statWords">—</span> words</span>
+                        <span class="font-mono text-xs text-gray-300"><span id="statWords" class="text-white font-medium">—</span> words</span>
                     </div>
                     <div class="stat-pill rounded-lg px-3.5 py-1.5 flex items-center gap-2">
                         <svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                        <span class="font-mono text-xs text-gray-300"><span id="statChars">—</span> chars</span>
+                        <span class="font-mono text-xs text-gray-300"><span id="statChars" class="text-white font-medium">—</span> chars</span>
                     </div>
                     <div class="stat-pill rounded-lg px-3.5 py-1.5 flex items-center gap-2">
                         <svg class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -189,12 +157,12 @@
         </div>
 
         <footer class="mt-16 text-center">
-            <p class="text-gray-600 text-xs font-mono">Powered by LocalStack Lambda · Tesseract OCR · Docker Compose</p>
+            <p class="text-gray-600 text-xs font-mono">Powered by Lambda OCR Service · Tesseract · Docker Compose</p>
         </footer>
     </div>
 
     <script>
-        // ===== DOM Elements =====
+        // ===== DOM =====
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const uploadPrompt = document.getElementById('uploadPrompt');
@@ -221,8 +189,7 @@
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
         dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
+            e.preventDefault(); dropZone.classList.remove('dragover');
             const file = e.dataTransfer.files[0];
             if (file && file.type.startsWith('image/')) handleFile(file);
         });
@@ -273,12 +240,13 @@
 
         // ===== Lambda API Call =====
         /**
-         * Calls the LocalStack Lambda OCR function via nginx reverse proxy.
-         * Sends base64-encoded image data and receives extracted text + timing.
+         * Calls the Lambda OCR function via nginx reverse proxy.
+         * The backend uses the same invoke endpoint format as LocalStack/AWS Lambda:
+         *   POST /2015-03-31/functions/ocr-service/invocations
          *
          * @param {string} imageBase64 - Base64 data URL of the image
-         * @param {string} filename - Original filename
-         * @returns {Promise<Object>} - { text, processing_time_ms, word_count, text_length, filename }
+         * @param {string} filename    - Original filename
+         * @returns {Promise<Object>}  - { text, processing_time_ms, word_count, text_length, filename }
          */
         async function callOcrLambda(imageBase64, filename) {
             const payload = { image: imageBase64, filename: filename };
@@ -299,7 +267,7 @@
             return result;
         }
 
-        // ===== Extract Button =====
+        // ===== Extract =====
         extractBtn.addEventListener('click', async () => {
             if (!base64Data || !selectedFile) return;
 

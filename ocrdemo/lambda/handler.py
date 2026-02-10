@@ -7,10 +7,10 @@ import os
 
 
 def lambda_handler(event, context):
-    """OCR Lambda handler - extracts text from uploaded images via direct invocation."""
+    """OCR Lambda handler - extracts text from uploaded images."""
 
     try:
-        # Support both direct invocation and API Gateway proxy
+        # Support both direct invocation and API Gateway proxy format
         if "body" in event and "httpMethod" in event:
             body = event.get("body", "")
             if event.get("isBase64Encoded", False):
@@ -25,7 +25,7 @@ def lambda_handler(event, context):
         if not image_data:
             return {"error": "No image data provided"}
 
-        # Strip data URL prefix if present
+        # Strip data URL prefix if present (e.g. "data:image/png;base64,...")
         if "," in image_data:
             image_data = image_data.split(",", 1)[1]
 
