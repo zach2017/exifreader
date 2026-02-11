@@ -2,3 +2,4 @@ cocrdemo/lambda-image/target/
 cocrdemo/lambda-zip/target/
 javaocrclient/target/
 fileprocess/uploads/
+ocrdemo/lambda/__pycache__/
