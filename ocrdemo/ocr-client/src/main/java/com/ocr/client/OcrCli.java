@@ -69,6 +69,10 @@ public class OcrCli implements Runnable {
                 defaultValue = "${OCR_AWS_REGION:-us-east-1}")
         String region;
 
+        @Option(names = {"-e", "--endpoint"}, description = "Custom endpoint URL (e.g. http://localhost:7878 for LocalStack)",
+                defaultValue = "${OCR_ENDPOINT:-}")
+        String endpoint;
+
         @Option(names = {"--image-fn"}, description = "Image OCR Lambda function name",
                 defaultValue = "${OCR_IMAGE_FUNCTION:-ocr-image}")
         String imageFn;
@@ -93,7 +97,7 @@ public class OcrCli implements Runnable {
         int maxSizeMb;
 
         LambdaInvoker buildInvoker() {
-            return new LambdaInvoker(region, imageFn, pdfFn, pdfOcrFn);
+            return new LambdaInvoker(region, endpoint, imageFn, pdfFn, pdfOcrFn);
         }
     }
 

@@ -42,10 +42,30 @@ public class LambdaInvoker implements AutoCloseable {
                          String imageOcrFunction,
                          String pdfExtractFunction,
                          String pdfOcrFunction) {
-        this.lambda = LambdaClient.builder()
+        this(region, null, imageOcrFunction, pdfExtractFunction, pdfOcrFunction);
+    }
+
+    /**
+     * @param region              AWS region
+     * @param endpointOverride    optional endpoint URL (e.g. "http://localhost:7878" for LocalStack)
+     * @param imageOcrFunction    name/ARN of the image OCR Lambda
+     * @param pdfExtractFunction  name/ARN of the PDF text extraction Lambda
+     * @param pdfOcrFunction      name/ARN of the PDF OCR Lambda
+     */
+    public LambdaInvoker(String region,
+                         String endpointOverride,
+                         String imageOcrFunction,
+                         String pdfExtractFunction,
+                         String pdfOcrFunction) {
+        var builder = LambdaClient.builder()
                 .region(Region.of(region))
-                .credentialsProvider(DefaultCredentialsProvider.create())
-                .build();
+                .credentialsProvider(DefaultCredentialsProvider.create());
+
+        if (endpointOverride != null && !endpointOverride.isBlank()) {
+            builder.endpointOverride(java.net.URI.create(endpointOverride));
+        }
+
+        this.lambda = builder.build();
         this.imageOcrFunction = imageOcrFunction;
         this.pdfExtractFunction = pdfExtractFunction;
         this.pdfOcrFunction = pdfOcrFunction;
