@@ -5,7 +5,9 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.ocr.model.OcrRequest;
 import com.ocr.model.OcrResponse.*;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.lambda.LambdaClient;
@@ -58,11 +60,19 @@ public class LambdaInvoker implements AutoCloseable {
                          String pdfExtractFunction,
                          String pdfOcrFunction) {
         var builder = LambdaClient.builder()
-                .region(Region.of(region))
-                .credentialsProvider(DefaultCredentialsProvider.create());
+                .region(Region.of(region));
 
         if (endpointOverride != null && !endpointOverride.isBlank()) {
-            builder.endpointOverride(java.net.URI.create(endpointOverride));
+            // Custom endpoint (e.g. LocalStack) — use static dummy credentials
+            // to prevent the SDK from making background STS/IMDS calls that
+            // would fail with UnknownHostException
+            builder.endpointOverride(java.net.URI.create(endpointOverride))
+                   .credentialsProvider(StaticCredentialsProvider.create(
+                           AwsBasicCredentials.create("test", "test")
+                   ));
+        } else {
+            // Real AWS — use the default credential chain
+            builder.credentialsProvider(DefaultCredentialsProvider.create());
         }
 
         this.lambda = builder.build();
