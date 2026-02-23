@@ -370,9 +370,10 @@ async function upload(file) {
     } catch (err) {
         bar.classList.add('err');
         badge.textContent = 'ERROR'; badge.className = 'badge error';
-        panel.innerHTML = `<span class="k">❌</span> <span class="v">${err.message}</span>`;
+        const hint = err.message.includes('Network') ? ' (check CORS / LocalStack running)' : '';
+        panel.innerHTML = `<span class="k">❌</span> <span class="v">${err.message}${hint}</span>`;
         panel.style.display = 'block';
-        log(`❌ ${file.name}: ${err.message}`, 'err');
+        log(`❌ ${file.name}: ${err.message}${hint}`, 'err');
     }
 }
 

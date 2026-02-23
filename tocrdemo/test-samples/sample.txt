@@ -1,0 +1,3 @@
+This is a sample text file.
+It should be SKIPPED by the Lambda pipeline.
+Only PDF and image files trigger the file-processor Lambda.
