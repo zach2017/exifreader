@@ -1,31 +1,68 @@
 version: "3.8"
 
 services:
+  # ─────────────────────────────────────────────────────────────
+  # 1. LocalStack — emulates AWS (S3, Lambda, IAM, CloudWatch)
+  # ─────────────────────────────────────────────────────────────
   localstack:
     container_name: localstack
     image: localstack/localstack:latest
     ports:
-      - "4566:4566"        # LocalStack Gateway
-      - "4510-4559:4510-4559"  # External services port range
+      - "4566:4566"
+      - "4510-4559:4510-4559"
     environment:
-      - SERVICES=s3,lambda,iam,logs
-      - DEBUG=1
-      - LAMBDA_EXECUTOR=docker
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - SERVICES=s3,lambda,iam,logs,sts
+      - DEBUG=0
+      - LAMBDA_EXECUTOR=local
+      - EAGER_SERVICE_LOADING=1
       - AWS_DEFAULT_REGION=us-east-1
-      - LAMBDA_DOCKER_NETWORK=localstack-s3-lambda_default
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
     volumes:
       - "./volume:/var/lib/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
-      - "./init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
 
+  # ─────────────────────────────────────────────────────────────
+  # 2. Setup — one-shot container that provisions all resources
+  #    Waits for LocalStack healthy, then:
+  #      • Creates S3 bucket with CORS
+  #      • Packages & deploys file-router Lambda
+  #      • Packages & deploys file-processor Lambda
+  #      • Wires S3 event notification → file-router
+  # ─────────────────────────────────────────────────────────────
+  setup:
+    container_name: localstack-setup
+    build:
+      context: ./setup
+      dockerfile: Dockerfile
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - LOCALSTACK_URL=http://localstack:4566
+    volumes:
+      - "./lambdas:/lambdas:ro"
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. Frontend — Nginx serving the upload HTML + proxying to S3
+  # ─────────────────────────────────────────────────────────────
   frontend:
     container_name: upload-frontend
     image: nginx:alpine
     ports:
       - "8080:80"
     volumes:
-      - "./html:/usr/share/nginx/html"
-      - "./nginx-conf:/etc/nginx/conf.d"
+      - "./html:/usr/share/nginx/html:ro"
+      - "./nginx-conf:/etc/nginx/conf.d:ro"
     depends_on:
-      - localstack
+      localstack:
+        condition: service_healthy

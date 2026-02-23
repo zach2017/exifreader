@@ -1,260 +1,136 @@
-# S3 → Lambda → Lambda Pipeline (LocalStack)
+# S3 → Lambda → Lambda Pipeline (LocalStack + Docker)
 
-A complete local AWS development environment using Docker + LocalStack that demonstrates:
-
-- **S3 bucket** creation and browser-based file uploads
-- **S3 event notifications** triggering Lambda functions
-- **Lambda-to-Lambda invocation** (the core pattern)
-- **File processing** (PDF metadata, image dimensions, file size)
-
----
+Everything runs locally in Docker. No AWS account needed.
 
 ## Architecture
 
 ```
-┌──────────┐     PUT      ┌──────────────┐   S3 Event    ┌──────────────┐
-│  Browser  │ ──────────▸  │  S3 Bucket   │ ────────────▸ │  Lambda 1    │
-│  (HTML)   │              │ file-uploads │  Notification  │ file-router  │
-└──────────┘              └──────────────┘               └──────┬───────┘
-                                                                │
-                                                    boto3.invoke│(if PDF/image)
-                                                                │
-                                                         ┌──────▼───────┐
-                                                         │  Lambda 2    │
-                                                         │file-processor│
-                                                         │              │
-                                                         │ • Downloads  │
-                                                         │   from S3    │
-                                                         │ • Extracts   │
-                                                         │   metadata   │
-                                                         └──────────────┘
+Browser ──PUT──▸ S3 (file-uploads) ──event──▸ λ file-router ──invoke──▸ λ file-processor
+                   │                              │                         │
+                   │ LocalStack container          │ Classifies file         │ Downloads from S3
+                   │ port 4566                     │ PDF or image? →         │ Extracts metadata
+                   │                               │ Invoke Lambda 2         │ Returns results
 ```
 
-### Flow
+### Docker Services
 
-1. **User uploads a file** via the HTML frontend → S3 `PUT` to `file-uploads` bucket
-2. **S3 event notification** fires `s3:ObjectCreated:*` → triggers **Lambda 1** (`file-router`)
-3. **Lambda 1** checks the file extension:
-   - PDF or image → **invokes Lambda 2** (`file-processor`) via `boto3`
-   - Other types → skips (logged)
-4. **Lambda 2** pulls the file from S3 using the bucket/key from the payload, then:
-   - **Images**: extracts dimensions (width × height) from binary headers
-   - **PDFs**: extracts page count, PDF version, encryption status
-   - Returns the processed metadata to Lambda 1
+| Service | Purpose |
+|---------|---------|
+| `localstack` | Emulates S3, Lambda, IAM, CloudWatch |
+| `setup` | One-shot: creates bucket, deploys Lambdas, wires S3 events |
+| `frontend` | Nginx: serves HTML + proxies API calls to LocalStack |
 
----
+### Lambda Functions (running on LocalStack)
+
+| Function | Trigger | Action |
+|----------|---------|--------|
+| `file-router` | S3 `ObjectCreated` event | Checks extension → invokes `file-processor` for PDF/images |
+| `file-processor` | Invoked by `file-router` via `boto3` | Downloads file from S3, extracts size/dimensions/pages |
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker & Docker Compose
-- AWS CLI (optional, for manual testing)
-
-### 1. Start the Stack
-
 ```bash
-# Clone/copy this project, then:
-cd localstack-s3-lambda
-
-# Make init script executable
-chmod +x init-aws.sh test-pipeline.sh
-
-# Start everything
+# Start everything (LocalStack + setup + frontend)
 docker compose up -d
+
+# Watch the setup container provision resources
+docker logs -f localstack-setup
+
+# Open the upload UI
+open http://localhost:8080
 ```
 
-LocalStack will automatically:
-- Create the S3 bucket (`file-uploads`)
-- Deploy both Lambda functions
-- Configure S3 event notifications
+The `setup` container waits for LocalStack to be healthy, then:
+1. Creates `file-uploads` S3 bucket with CORS
+2. Packages and deploys both Lambda functions
+3. Wires S3 event notification → `file-router`
 
-### 2. Open the Web UI
-
-```
-http://localhost:8080
-```
-
-Drag & drop files (PDFs, images) to upload. The UI shows real-time processing results from the Lambda chain.
-
-### 3. Run the Test Script (optional)
+### Verify with CLI
 
 ```bash
+chmod +x test-pipeline.sh
 ./test-pipeline.sh
 ```
 
-This creates test PDF/PNG files, uploads them, and shows the Lambda processing results.
+## How Lambda-to-Lambda Invocation Works
 
----
-
-## How to Call a Lambda from Another Lambda
-
-This is the core pattern. There are **3 main approaches**:
-
-### Method 1: Direct Invocation via AWS SDK (Used Here)
-
-The simplest and most common approach. Lambda 1 uses `boto3` to invoke Lambda 2.
+`file-router` calls `file-processor` using **boto3 direct invocation**:
 
 ```python
-import boto3
-import json
+import boto3, json
 
-lambda_client = boto3.client('lambda')
+lambda_client = boto3.client('lambda', endpoint_url='http://localhost:4566', ...)
 
-# ── Synchronous (wait for response) ─────────────────────
+# Synchronous — wait for result
 response = lambda_client.invoke(
-    FunctionName='file-processor',      # Target Lambda name or ARN
-    InvocationType='RequestResponse',   # Sync: blocks until complete
-    Payload=json.dumps({                # JSON payload
-        'bucket': 'my-bucket',
-        'key': 'file.pdf',
-        'file_type': 'pdf',
+    FunctionName='file-processor',         # target Lambda
+    InvocationType='RequestResponse',      # sync (or 'Event' for async)
+    Payload=json.dumps({
+        'bucket': 'file-uploads',
+        'key': 'uploads/photo.png',
+        'file_type': 'image',
+        'extension': '.png',
     }),
 )
-
-# Read the response
-result = json.loads(response['Payload'].read().decode('utf-8'))
-print(result)
-
-# ── Asynchronous (fire and forget) ──────────────────────
-response = lambda_client.invoke(
-    FunctionName='file-processor',
-    InvocationType='Event',             # Async: returns immediately (HTTP 202)
-    Payload=json.dumps({...}),
-)
-# No response payload — Lambda 2 runs in background
+result = json.loads(response['Payload'].read())
 ```
 
-**InvocationType options:**
+### Three Invocation Patterns
 
-| Type | Behavior | Use Case |
-|------|----------|----------|
-| `RequestResponse` | Synchronous — waits for result | Need the result immediately |
-| `Event` | Asynchronous — fire & forget | Background processing, don't need result |
-| `DryRun` | Validates parameters only | Testing/debugging |
-
-### Method 2: AWS Step Functions (State Machines)
-
-Best for complex multi-step workflows with retry logic, parallel execution, and error handling.
-
-```json
-{
-  "StartAt": "RouteFile",
-  "States": {
-    "RouteFile": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-router",
-      "Next": "ProcessFile"
-    },
-    "ProcessFile": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-processor",
-      "End": true,
-      "Retry": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "IntervalSeconds": 2,
-          "MaxAttempts": 3
-        }
-      ]
-    }
-  }
-}
-```
-
-### Method 3: SNS/SQS (Decoupled)
-
-Best for fan-out patterns where multiple Lambdas need to process the same event.
-
-```python
-# Publisher Lambda
-sns_client = boto3.client('sns')
-sns_client.publish(
-    TopicArn='arn:aws:sns:us-east-1:000000000000:file-events',
-    Message=json.dumps({'bucket': 'my-bucket', 'key': 'file.pdf'}),
-)
-
-# Multiple Lambdas can subscribe to the same SNS topic
-```
-
-### Comparison
-
-| Approach | Coupling | Latency | Retry | Fan-out | Complexity |
-|----------|----------|---------|-------|---------|------------|
-| **Direct (boto3)** | Tight | Low | Manual | No | Low |
-| **Step Functions** | Orchestrated | Medium | Built-in | Yes (parallel) | Medium |
-| **SNS/SQS** | Loose | Higher | Built-in (SQS) | Yes | Medium |
-
----
+| Pattern | How | Best For |
+|---------|-----|----------|
+| **Direct (boto3)** | `lambda.invoke()` — sync or async | Simple chains, low latency |
+| **Step Functions** | State machine orchestration | Complex workflows, retries, parallel |
+| **SNS/SQS** | Pub/sub or queue | Fan-out, decoupling, dead-letter queues |
 
 ## Project Structure
 
 ```
-localstack-s3-lambda/
-├── docker-compose.yml          # LocalStack + Nginx containers
-├── init-aws.sh                 # Auto-creates S3, Lambdas, notifications
-├── test-pipeline.sh            # CLI test script
-├── frontend/
-│   ├── index.html              # Upload UI (drag & drop)
-│   └── nginx.conf              # Reverse proxy to LocalStack
-└── lambdas/
-    ├── file_router.py          # Lambda 1: S3 event → classify → invoke L2
-    └── file_processor.py       # Lambda 2: Download from S3, extract metadata
+├── docker-compose.yml      # 3 services: localstack, setup, frontend
+├── setup/
+│   ├── Dockerfile          # Python + AWS CLI + zip
+│   └── provision.sh        # Creates all AWS resources on LocalStack
+├── lambdas/
+│   ├── file_router.py      # λ1: S3 event → classify → invoke λ2
+│   └── file_processor.py   # λ2: download from S3 → extract metadata
+├── html/
+│   └── index.html          # Upload UI (drag & drop)
+├── nginx-conf/
+│   └── default.conf        # Proxy /api/s3 and /api/lambda to LocalStack
+└── test-pipeline.sh        # CLI smoke test
 ```
 
----
-
-## Manual AWS CLI Commands
+## Useful Commands
 
 ```bash
-# Set alias for convenience
+# Alias for convenience
 alias awslocal='aws --endpoint-url=http://localhost:4566 --region=us-east-1'
 
-# List S3 buckets
+# List resources
 awslocal s3 ls
+awslocal lambda list-functions --query 'Functions[].FunctionName'
 
 # Upload a file
 awslocal s3 cp myfile.pdf s3://file-uploads/uploads/myfile.pdf
 
-# List Lambda functions
-awslocal lambda list-functions
-
 # Invoke Lambda directly
-awslocal lambda invoke \
-  --function-name file-processor \
-  --payload '{"bucket":"file-uploads","key":"uploads/myfile.pdf","file_type":"pdf","extension":".pdf","source_lambda":"manual"}' \
-  output.json && cat output.json | python3 -m json.tool
+awslocal lambda invoke --function-name file-processor \
+  --payload '{"bucket":"file-uploads","key":"uploads/myfile.pdf","file_type":"pdf","extension":".pdf","source_lambda":"cli"}' \
+  result.json && cat result.json | python3 -m json.tool
 
-# Check S3 event notification config
-awslocal s3api get-bucket-notification-configuration --bucket file-uploads
+# View logs
+docker logs localstack 2>&1 | grep "file-processor\|file-router"
 
-# View Lambda logs
-awslocal logs describe-log-groups
-awslocal logs get-log-events \
-  --log-group-name /aws/lambda/file-router \
-  --log-stream-name $(awslocal logs describe-log-streams \
-    --log-group-name /aws/lambda/file-router \
-    --query 'logStreams[-1].logStreamName' --output text)
+# Rebuild after Lambda code changes
+docker compose up -d --build setup
 ```
-
----
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| LocalStack not starting | Check Docker daemon is running: `docker ps` |
-| Lambdas not created | Check init logs: `docker logs localstack` |
-| CORS errors in browser | Use the Nginx proxy (port 8080), not direct LocalStack (4566) |
-| Lambda timeout | Increase timeout in `init-aws.sh` (default: 60s) |
-| S3 notification not firing | Verify: `awslocal s3api get-bucket-notification-configuration --bucket file-uploads` |
-
----
-
-## Extending This
-
-- **Add Step Functions**: Orchestrate a multi-step pipeline (e.g., validate → process → store results)
-- **Add SQS Dead Letter Queue**: Catch failed Lambda invocations
-- **Add DynamoDB**: Store processing results in a table
-- **Add SNS notifications**: Send email/SMS when processing completes
-- **Add API Gateway**: Create REST endpoints in front of Lambdas
+| Issue | Fix |
+|-------|-----|
+| Setup fails | `docker logs localstack-setup` — check for errors |
+| Lambda not found | Wait for setup to complete: `docker logs -f localstack-setup` |
+| CORS errors | Use port 8080 (Nginx proxy), not 4566 directly |
+| S3 notification not firing | `awslocal s3api get-bucket-notification-configuration --bucket file-uploads` |
+| Rebuild Lambdas | `docker compose up -d --build setup` |
