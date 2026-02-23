@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 File Upload — LocalStack</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0c0c0f;
+            --surface: #16161a;
+            --surface-2: #1e1e24;
+            --border: #2a2a33;
+            --border-hover: #3d3d4a;
+            --text: #e8e8ed;
+            --text-muted: #8888a0;
+            --accent: #6c5ce7;
+            --accent-glow: rgba(108, 92, 231, 0.25);
+            --success: #2ed573;
+            --success-glow: rgba(46, 213, 115, 0.15);
+            --warning: #ffa502;
+            --error: #ff4757;
+            --pdf-color: #ff6348;
+            --img-color: #3742fa;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+        }
+
+        /* ── Header ─────────────────────────────── */
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        header .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: var(--accent-glow);
+            border: 1px solid rgba(108, 92, 231, 0.3);
+            padding: 4px 14px;
+            border-radius: 100px;
+            margin-bottom: 1rem;
+            letter-spacing: 0.05em;
+        }
+        header .badge::before {
+            content: '';
+            width: 6px; height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-bottom: 0.5rem;
+        }
+        header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* ── Architecture Diagram ───────────────── */
+        .arch-flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            margin-bottom: 3rem;
+            padding: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow-x: auto;
+        }
+        .arch-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 12px 16px;
+            min-width: 90px;
+        }
+        .arch-node .icon {
+            font-size: 1.5rem;
+        }
+        .arch-node .label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+        .arch-arrow {
+            color: var(--border-hover);
+            font-size: 1.2rem;
+            font-family: 'JetBrains Mono', monospace;
+            flex-shrink: 0;
+        }
+
+        /* ── Drop Zone ──────────────────────────── */
+        .drop-zone {
+            position: relative;
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 3rem 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: var(--surface);
+            margin-bottom: 2rem;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--accent);
+            background: rgba(108, 92, 231, 0.05);
+            box-shadow: 0 0 40px var(--accent-glow);
+        }
+        .drop-zone.drag-over {
+            transform: scale(1.01);
+        }
+        .drop-zone .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            display: block;
+        }
+        .drop-zone h3 {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        .drop-zone p {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .drop-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .supported-types {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .type-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.65rem;
+            padding: 3px 10px;
+            border-radius: 100px;
+            background: var(--surface-2);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        /* ── Upload Queue ───────────────────────── */
+        .upload-queue {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .file-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .file-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .file-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+        .file-icon.pdf { background: rgba(255, 99, 72, 0.15); color: var(--pdf-color); }
+        .file-icon.image { background: rgba(55, 66, 250, 0.15); color: var(--img-color); }
+        .file-icon.other { background: rgba(136, 136, 160, 0.15); color: var(--text-muted); }
+
+        .file-info { flex: 1; min-width: 0; }
+        .file-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .file-status {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            padding: 4px 12px;
+            border-radius: 100px;
+        }
+        .file-status.uploading { background: var(--accent-glow); color: var(--accent); }
+        .file-status.success { background: var(--success-glow); color: var(--success); }
+        .file-status.error { background: rgba(255, 71, 87, 0.15); color: var(--error); }
+        .file-status.skipped { background: rgba(255, 165, 2, 0.15); color: var(--warning); }
+
+        /* Progress bar */
+        .progress-bar {
+            height: 3px;
+            background: var(--surface-2);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        .progress-fill.done { background: var(--success); }
+        .progress-fill.error { background: var(--error); }
+
+        /* Lambda result panel */
+        .lambda-result {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            line-height: 1.7;
+            color: var(--text-muted);
+            max-height: 280px;
+            overflow-y: auto;
+        }
+        .lambda-result .label {
+            color: var(--accent);
+        }
+        .lambda-result .value {
+            color: var(--text);
+        }
+        .lambda-result .section-title {
+            color: var(--success);
+            margin-top: 8px;
+            display: block;
+        }
+
+        /* ── Logs Panel ─────────────────────────── */
+        .logs-section {
+            margin-top: 3rem;
+        }
+        .logs-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .logs-header h3 {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        .logs-header button {
+            background: var(--surface);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .logs-header button:hover {
+            border-color: var(--border-hover);
+            color: var(--text);
+        }
+        .log-viewer {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            line-height: 1.8;
+            max-height: 300px;
+            overflow-y: auto;
+            color: var(--text-muted);
+        }
+        .log-entry { margin-bottom: 2px; }
+        .log-entry .time { color: var(--text-muted); opacity: 0.5; }
+        .log-entry.info .msg { color: var(--text); }
+        .log-entry.success .msg { color: var(--success); }
+        .log-entry.error .msg { color: var(--error); }
+        .log-entry.warn .msg { color: var(--warning); }
+
+        /* ── Config Section ─────────────────────── */
+        .config-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 2rem;
+            padding: 12px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+        }
+        .config-bar label { color: var(--text-muted); white-space: nowrap; }
+        .config-bar input {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            padding: 6px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+        }
+        .config-bar input:focus { outline: none; border-color: var(--accent); }
+        .config-bar .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+        .config-bar .dot.disconnected { background: var(--error); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="badge">LOCALSTACK DEV</div>
+            <h1>S3 → Lambda Pipeline</h1>
+            <p>Upload files to S3. PDFs & images trigger a Lambda chain for processing.</p>
+        </header>
+
+        <!-- Architecture Flow -->
+        <div class="arch-flow">
+            <div class="arch-node">
+                <span class="icon">🌐</span>
+                <span class="label">Browser<br>Upload</span>
+            </div>
+            <span class="arch-arrow">──▸</span>
+            <div class="arch-node">
+                <span class="icon">📦</span>
+                <span class="label">S3 Bucket<br>file-uploads</span>
+            </div>
+            <span class="arch-arrow">──▸</span>
+            <div class="arch-node">
+                <span class="icon">⚡</span>
+                <span class="label">Lambda 1<br>file-router</span>
+            </div>
+            <span class="arch-arrow">──▸</span>
+            <div class="arch-node">
+                <span class="icon">🔧</span>
+                <span class="label">Lambda 2<br>file-processor</span>
+            </div>
+        </div>
+
+        <!-- Endpoint Config -->
+        <div class="config-bar">
+            <span class="dot" id="statusDot"></span>
+            <label>ENDPOINT</label>
+            <input type="text" id="endpointUrl" value="http://localhost:4566" />
+        </div>
+
+        <!-- Drop Zone -->
+        <div class="drop-zone" id="dropZone">
+            <input type="file" id="fileInput" multiple />
+            <span class="upload-icon">⬆</span>
+            <h3>Drop files here or click to browse</h3>
+            <p>Files will be uploaded to S3 and processed by the Lambda pipeline</p>
+            <div class="supported-types">
+                <span class="type-badge">.pdf</span>
+                <span class="type-badge">.jpg</span>
+                <span class="type-badge">.png</span>
+                <span class="type-badge">.gif</span>
+                <span class="type-badge">.webp</span>
+                <span class="type-badge">.bmp</span>
+                <span class="type-badge">.svg</span>
+                <span class="type-badge">any file*</span>
+            </div>
+        </div>
+
+        <!-- Upload Queue -->
+        <div class="upload-queue" id="uploadQueue"></div>
+
+        <!-- Logs -->
+        <div class="logs-section">
+            <div class="logs-header">
+                <h3>📋 Event Log</h3>
+                <button onclick="clearLogs()">Clear</button>
+            </div>
+            <div class="log-viewer" id="logViewer">
+                <div class="log-entry info"><span class="time">[--:--:--]</span> <span class="msg">Waiting for uploads...</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ── Configuration ───────────────────────────────────────
+    const BUCKET = 'file-uploads';
+    const getEndpoint = () => document.getElementById('endpointUrl').value.replace(/\/$/, '');
+
+    const IMAGE_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.bmp','.webp','.tiff','.svg']);
+    const PDF_EXTS = new Set(['.pdf']);
+
+    // ── Logging ─────────────────────────────────────────────
+    function log(msg, level = 'info') {
+        const viewer = document.getElementById('logViewer');
+        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${level}`;
+        entry.innerHTML = `<span class="time">[${time}]</span> <span class="msg">${msg}</span>`;
+        viewer.appendChild(entry);
+        viewer.scrollTop = viewer.scrollHeight;
+    }
+    function clearLogs() {
+        document.getElementById('logViewer').innerHTML = '';
+        log('Logs cleared');
+    }
+
+    // ── Health Check ────────────────────────────────────────
+    async function checkConnection() {
+        const dot = document.getElementById('statusDot');
+        try {
+            const resp = await fetch(`${getEndpoint()}/_localstack/health`, { mode: 'cors' });
+            dot.className = resp.ok ? 'dot' : 'dot disconnected';
+        } catch {
+            dot.className = 'dot disconnected';
+        }
+    }
+    setInterval(checkConnection, 5000);
+    checkConnection();
+
+    // ── File Classification ─────────────────────────────────
+    function getFileExtension(name) {
+        const dot = name.lastIndexOf('.');
+        return dot >= 0 ? name.substring(dot).toLowerCase() : '';
+    }
+
+    function classifyFile(ext) {
+        if (PDF_EXTS.has(ext)) return 'pdf';
+        if (IMAGE_EXTS.has(ext)) return 'image';
+        return 'other';
+    }
+
+    function formatSize(bytes) {
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0;
+        while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+        return `${bytes.toFixed(1)} ${units[i]}`;
+    }
+
+    // ── Drag & Drop ─────────────────────────────────────────
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    ['dragenter', 'dragover'].forEach(e =>
+        dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.add('drag-over'); }));
+    ['dragleave', 'drop'].forEach(e =>
+        dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.remove('drag-over'); }));
+
+    dropZone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+    fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+    // ── Upload Handler ──────────────────────────────────────
+    function handleFiles(files) {
+        Array.from(files).forEach(file => uploadFile(file));
+        fileInput.value = '';
+    }
+
+    async function uploadFile(file) {
+        const ext = getFileExtension(file.name);
+        const type = classifyFile(ext);
+        const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        // Create card
+        const card = createFileCard(id, file, type);
+        document.getElementById('uploadQueue').prepend(card);
+
+        log(`📤 Uploading: ${file.name} (${formatSize(file.size)}, type: ${type})`);
+
+        const statusEl = card.querySelector('.file-status');
+        const progressFill = card.querySelector('.progress-fill');
+        const resultPanel = card.querySelector('.lambda-result');
+
+        try {
+            // ── Upload to S3 via LocalStack ──
+            const endpoint = getEndpoint();
+            const s3Key = `uploads/${Date.now()}-${file.name}`;
+            const url = `${endpoint}/${BUCKET}/${s3Key}`;
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url, true);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+            // Progress tracking
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const pct = (e.loaded / e.total) * 100;
+                    progressFill.style.width = `${pct}%`;
+                }
+            };
+
+            await new Promise((resolve, reject) => {
+                xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`));
+                xhr.onerror = () => reject(new Error('Network error'));
+                xhr.send(file);
+            });
+
+            progressFill.style.width = '100%';
+            progressFill.classList.add('done');
+            log(`✅ Uploaded: ${file.name} → s3://${BUCKET}/${s3Key}`, 'success');
+
+            // ── Check Lambda processing (poll logs or invoke directly) ──
+            statusEl.textContent = 'PROCESSING';
+            statusEl.className = 'file-status uploading';
+            log(`⚡ S3 event notification will trigger file-router Lambda...`);
+
+            // Give LocalStack time to process the S3 event → Lambda chain
+            await new Promise(r => setTimeout(r, 3000));
+
+            // Fetch Lambda logs to show results
+            try {
+                const logsResp = await fetch(`${endpoint}/_localstack/lambda/file-processor/logs`);
+                if (logsResp.ok) {
+                    log(`📋 Lambda logs retrieved`, 'success');
+                }
+            } catch {}
+
+            // Show processing result by manually invoking file-processor
+            // to get the result (S3 notification is async, we want to show results in UI)
+            const processorPayload = {
+                bucket: BUCKET,
+                key: s3Key,
+                size: file.size,
+                file_type: type,
+                extension: ext,
+                source_lambda: 'ui-direct-check',
+            };
+
+            if (type !== 'other') {
+                const lambdaResp = await fetch(`${endpoint}/2015-03-31/functions/file-processor/invocations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(processorPayload),
+                });
+
+                if (lambdaResp.ok) {
+                    const result = await lambdaResp.json();
+                    statusEl.textContent = 'PROCESSED';
+                    statusEl.className = 'file-status success';
+                    resultPanel.innerHTML = renderResult(result);
+                    resultPanel.style.display = 'block';
+                    log(`🔧 file-processor result for ${file.name}: ${result.status}`, 'success');
+                } else {
+                    throw new Error('Lambda invocation failed');
+                }
+            } else {
+                statusEl.textContent = 'SKIPPED';
+                statusEl.className = 'file-status skipped';
+                resultPanel.innerHTML = `<span class="label">⏭️ Skipped:</span> <span class="value">File type "${ext}" is not PDF/image — Lambda chain not triggered.</span>`;
+                resultPanel.style.display = 'block';
+                log(`⏭️ Skipped ${file.name} — unsupported type for Lambda processing`, 'warn');
+            }
+
+        } catch (err) {
+            progressFill.classList.add('error');
+            statusEl.textContent = 'ERROR';
+            statusEl.className = 'file-status error';
+            log(`❌ Error with ${file.name}: ${err.message}`, 'error');
+        }
+    }
+
+    // ── UI Builders ─────────────────────────────────────────
+    function createFileCard(id, file, type) {
+        const ext = getFileExtension(file.name);
+        const card = document.createElement('div');
+        card.className = 'file-card';
+        card.id = id;
+        card.innerHTML = `
+            <div class="file-card-header">
+                <div class="file-icon ${type}">
+                    ${type === 'pdf' ? '📄' : type === 'image' ? '🖼️' : '📁'}
+                </div>
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-meta">${formatSize(file.size)} · ${ext || 'no ext'} · ${file.type || 'unknown'}</div>
+                </div>
+                <span class="file-status uploading">UPLOADING</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+            <div class="lambda-result" style="display:none"></div>
+        `;
+        return card;
+    }
+
+    function renderResult(result) {
+        if (result.status === 'error') {
+            return `<span class="label">❌ Error:</span> <span class="value">${result.error}</span>`;
+        }
+
+        const info = result.file_info || {};
+        const proc = result.processing_result || {};
+        let html = '';
+
+        html += `<span class="section-title">── File Info ──</span>`;
+        html += `<span class="label">S3 URI:</span> <span class="value">${info.s3_uri || 'N/A'}</span><br>`;
+        html += `<span class="label">Type:</span> <span class="value">${info.file_type || 'N/A'}</span><br>`;
+        html += `<span class="label">Content-Type:</span> <span class="value">${info.content_type || 'N/A'}</span><br>`;
+
+        html += `<span class="section-title">── Processing Result ──</span>`;
+        html += `<span class="label">Processor:</span> <span class="value">${proc.processor || 'N/A'}</span><br>`;
+        html += `<span class="label">Size:</span> <span class="value">${proc.formatted_size || 'N/A'} (${(proc.raw_size_bytes || 0).toLocaleString()} bytes)</span><br>`;
+
+        if (proc.dimensions) {
+            html += `<span class="label">Dimensions:</span> <span class="value">${proc.dimensions}px</span><br>`;
+        }
+        if (proc.page_count !== undefined) {
+            html += `<span class="label">Pages:</span> <span class="value">${proc.page_count}</span><br>`;
+        }
+        if (proc.pdf_version) {
+            html += `<span class="label">PDF Version:</span> <span class="value">${proc.pdf_version}</span><br>`;
+        }
+        if (proc.encrypted !== undefined) {
+            html += `<span class="label">Encrypted:</span> <span class="value">${proc.encrypted ? 'Yes' : 'No'}</span><br>`;
+        }
+
+        html += `<span class="section-title">── Pipeline ──</span>`;
+        html += `<span class="label">Invoked by:</span> <span class="value">${result.invoked_by || 'N/A'}</span><br>`;
+        html += `<span class="label">Processed at:</span> <span class="value">${result.processed_at || 'N/A'}</span>`;
+
+        return html;
+    }
+    </script>
+</body>
+</html>
