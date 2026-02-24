@@ -26,6 +26,11 @@ services:
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - PERSISTENCE=1
+      - EXTRA_CORS_ALLOWED_ORIGINS=*
+      - EXTRA_CORS_ALLOWED_HEADERS=*
+      - EXTRA_CORS_EXPOSE_HEADERS=*
+      - DISABLE_CORS_CHECKS=1
+      - DISABLE_CUSTOM_CORS_S3=1
       - LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT=120
     volumes:
       - "./infrastructure/localstack:/etc/localstack/init/ready.d"
