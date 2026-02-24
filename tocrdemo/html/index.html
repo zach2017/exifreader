@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 → Lambda Pipeline</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0a0a0d;
+            --surface: #131318;
+            --surface-2: #1a1a22;
+            --border: #26263a;
+            --border-hi: #3a3a55;
+            --text: #e4e4ef;
+            --text-dim: #7a7a9a;
+            --accent: #635bff;
+            --accent-soft: rgba(99, 91, 255, 0.12);
+            --green: #30d158;
+            --green-soft: rgba(48, 209, 88, 0.12);
+            --red: #ff453a;
+            --red-soft: rgba(255, 69, 58, 0.12);
+            --orange: #ff9f0a;
+            --orange-soft: rgba(255, 159, 10, 0.12);
+            --blue: #0a84ff;
+            --radius: 10px;
+        }
+
+        body {
+            font-family: 'Outfit', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem 1.5rem;
+        }
+
+        .container { max-width: 820px; margin: 0 auto; }
+
+        /* ── Header ─────────────────────────────── */
+        header { text-align: center; margin-bottom: 2.5rem; }
+        .chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem;
+            color: var(--green); background: var(--green-soft);
+            border: 1px solid rgba(48, 209, 88, 0.25);
+            padding: 3px 12px; border-radius: 100px; margin-bottom: 1rem;
+        }
+        .chip::before {
+            content: ''; width: 5px; height: 5px;
+            background: var(--green); border-radius: 50%;
+            animation: blink 2s infinite;
+        }
+        .chip.offline { color: var(--red); background: var(--red-soft); border-color: rgba(255,69,58,0.25); }
+        .chip.offline::before { background: var(--red); }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em; }
+        header p { color: var(--text-dim); font-size: 0.88rem; margin-top: 0.4rem; }
+
+        /* ── Architecture ───────────────────────── */
+        .pipeline {
+            display: flex; align-items: center; justify-content: center;
+            gap: 0; padding: 1.2rem 1rem; margin-bottom: 2rem;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); overflow-x: auto;
+        }
+        .pipe-node {
+            display: flex; flex-direction: column; align-items: center;
+            gap: 4px; padding: 8px 14px; min-width: 70px;
+        }
+        .pipe-node .ico { font-size: 1.3rem; }
+        .pipe-node .lbl {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem;
+            color: var(--text-dim); text-align: center; line-height: 1.4;
+        }
+        .pipe-arrow {
+            color: var(--border-hi); font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.9rem; flex-shrink: 0;
+        }
+
+        /* ── Drop Zone ──────────────────────────── */
+        .dropzone {
+            position: relative; border: 2px dashed var(--border);
+            border-radius: var(--radius); padding: 2.5rem 1.5rem;
+            text-align: center; cursor: pointer; margin-bottom: 1.5rem;
+            background: var(--surface); transition: all 0.25s ease;
+        }
+        .dropzone:hover, .dropzone.active {
+            border-color: var(--accent); background: var(--accent-soft);
+            box-shadow: 0 0 30px rgba(99, 91, 255, 0.08);
+        }
+        .dropzone.active { transform: scale(1.005); }
+        .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .dropzone h3 { font-weight: 500; margin: 0.8rem 0 0.3rem; }
+        .dropzone p { color: var(--text-dim); font-size: 0.8rem; }
+        .dz-icon { font-size: 2.2rem; display: block; }
+        .tags { display: flex; gap: 5px; justify-content: center; margin-top: 0.8rem; flex-wrap: wrap; }
+        .tag {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem;
+            padding: 2px 8px; border-radius: 100px;
+            background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+        }
+
+        /* ── File Cards ─────────────────────────── */
+        .queue { display: flex; flex-direction: column; gap: 10px; }
+
+        .card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 1.1rem;
+            animation: slideUp 0.25s ease;
+        }
+        @keyframes slideUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+        .card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .card-ico {
+            width: 38px; height: 38px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem; flex-shrink: 0;
+        }
+        .card-ico.pdf { background: rgba(255,69,58,0.12); }
+        .card-ico.image { background: rgba(10,132,255,0.12); }
+        .card-ico.other { background: rgba(122,122,154,0.12); }
+
+        .card-info { flex: 1; min-width: 0; }
+        .card-name { font-weight: 500; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-meta { font-size: 0.7rem; color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; }
+
+        .badge {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem;
+            padding: 3px 10px; border-radius: 100px; white-space: nowrap;
+        }
+        .badge.uploading { background: var(--accent-soft); color: var(--accent); }
+        .badge.processing { background: var(--orange-soft); color: var(--orange); }
+        .badge.success { background: var(--green-soft); color: var(--green); }
+        .badge.error { background: var(--red-soft); color: var(--red); }
+        .badge.skipped { background: var(--orange-soft); color: var(--orange); }
+
+        .progress { height: 2px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+        .progress-bar { height: 100%; background: var(--accent); transition: width 0.3s; width: 0; }
+        .progress-bar.done { background: var(--green); }
+        .progress-bar.err { background: var(--red); }
+
+        .result-panel {
+            display: none; background: var(--bg); border: 1px solid var(--border);
+            border-radius: 6px; padding: 0.9rem;
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
+            line-height: 1.7; color: var(--text-dim); max-height: 260px; overflow-y: auto;
+        }
+        .result-panel .k { color: var(--accent); }
+        .result-panel .v { color: var(--text); }
+        .result-panel .h { color: var(--green); margin-top: 6px; display: block; }
+
+        /* ── Logs ───────────────────────────────── */
+        .logs { margin-top: 2.5rem; }
+        .logs-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; }
+        .logs-bar h3 { font-size: 0.9rem; font-weight: 500; }
+        .logs-bar button {
+            background: var(--surface); color: var(--text-dim); border: 1px solid var(--border);
+            padding: 4px 12px; border-radius: 6px; cursor: pointer;
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
+        }
+        .logs-bar button:hover { border-color: var(--border-hi); color: var(--text); }
+
+        .logbox {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 0.8rem;
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
+            line-height: 1.8; max-height: 260px; overflow-y: auto; color: var(--text-dim);
+        }
+        .log .t { opacity: 0.45; }
+        .log.ok .m { color: var(--green); }
+        .log.err .m { color: var(--red); }
+        .log.warn .m { color: var(--orange); }
+        .log.info .m { color: var(--text); }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <div class="chip" id="chip">LOCALSTACK CONNECTED</div>
+        <h1>S3 → Lambda Pipeline</h1>
+        <p>Upload files to S3. PDFs & images are processed by a Lambda chain on LocalStack.</p>
+    </header>
+
+    <div class="pipeline">
+        <div class="pipe-node"><span class="ico">🌐</span><span class="lbl">Browser</span></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-node"><span class="ico">📦</span><span class="lbl">S3<br>file-uploads</span></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-node"><span class="ico">⚡</span><span class="lbl">λ1<br>file-router</span></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-node"><span class="ico">🔧</span><span class="lbl">λ2<br>file-processor</span></div>
+    </div>
+
+    <div class="dropzone" id="dz">
+        <input type="file" id="fi" multiple>
+        <span class="dz-icon">⬆</span>
+        <h3>Drop files here or click to browse</h3>
+        <p>PDFs & images trigger the full Lambda pipeline</p>
+        <div class="tags">
+            <span class="tag">.pdf</span><span class="tag">.jpg</span><span class="tag">.png</span>
+            <span class="tag">.gif</span><span class="tag">.webp</span><span class="tag">.bmp</span>
+            <span class="tag">others skipped</span>
+        </div>
+    </div>
+
+    <div class="queue" id="queue"></div>
+
+    <div class="logs">
+        <div class="logs-bar">
+            <h3>📋 Event Log</h3>
+            <button onclick="document.getElementById('lb').innerHTML='';log('Cleared','info')">Clear</button>
+        </div>
+        <div class="logbox" id="lb">
+            <div class="log info"><span class="t">[--:--:--]</span> <span class="m">Ready — waiting for uploads...</span></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// Config — all requests go through the Nginx proxy
+// ─────────────────────────────────────────────────────────────
+const BUCKET = 'file-uploads';
+const S3_BASE = '/api/s3';                    // proxied → localstack:4566
+const LAMBDA_BASE = '/api/lambda';            // proxied → localstack:4566/2015-03-31/functions/
+const HEALTH_URL = '/api/health';             // proxied → localstack:4566/_localstack/health
+
+const IMG = new Set(['.jpg','.jpeg','.png','.gif','.bmp','.webp','.tiff','.svg']);
+const PDF = new Set(['.pdf']);
+
+// ── Helpers ─────────────────────────────────────────────────
+function ext(name) { const i = name.lastIndexOf('.'); return i >= 0 ? name.slice(i).toLowerCase() : ''; }
+function classify(e) { if (PDF.has(e)) return 'pdf'; if (IMG.has(e)) return 'image'; return 'other'; }
+function fmtSize(b) { const u=['B','KB','MB','GB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(1)+' '+u[i]; }
+function ts() { return new Date().toLocaleTimeString('en-US',{hour12:false}); }
+
+// ── Logging ─────────────────────────────────────────────────
+function log(msg, level='info') {
+    const lb = document.getElementById('lb');
+    const d = document.createElement('div');
+    d.className = `log ${level}`;
+    d.innerHTML = `<span class="t">[${ts()}]</span> <span class="m">${msg}</span>`;
+    lb.appendChild(d);
+    lb.scrollTop = lb.scrollHeight;
+}
+
+// ── Health check ────────────────────────────────────────────
+async function health() {
+    const chip = document.getElementById('chip');
+    try {
+        const r = await fetch(HEALTH_URL);
+        if (r.ok) { chip.className = 'chip'; chip.textContent = 'LOCALSTACK CONNECTED'; return; }
+    } catch {}
+    chip.className = 'chip offline'; chip.textContent = 'LOCALSTACK OFFLINE';
+}
+setInterval(health, 5000); health();
+
+// ── Drag & drop ─────────────────────────────────────────────
+const dz = document.getElementById('dz');
+const fi = document.getElementById('fi');
+['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('active'); }));
+['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('active'); }));
+dz.addEventListener('drop', e => go(e.dataTransfer.files));
+fi.addEventListener('change', e => { go(e.target.files); fi.value = ''; });
+
+function go(files) { Array.from(files).forEach(f => upload(f)); }
+
+// ── Upload + process ────────────────────────────────────────
+async function upload(file) {
+    const e = ext(file.name);
+    const type = classify(e);
+    const id = 'f' + Date.now() + Math.random().toString(36).slice(2,5);
+
+    // Build card
+    const card = document.createElement('div');
+    card.className = 'card'; card.id = id;
+    card.innerHTML = `
+        <div class="card-top">
+            <div class="card-ico ${type}">${type==='pdf'?'📄':type==='image'?'🖼️':'📁'}</div>
+            <div class="card-info">
+                <div class="card-name">${file.name}</div>
+                <div class="card-meta">${fmtSize(file.size)} · ${e||'no ext'} · ${file.type||'unknown'}</div>
+            </div>
+            <span class="badge uploading">UPLOADING</span>
+        </div>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <div class="result-panel"></div>`;
+    document.getElementById('queue').prepend(card);
+
+    const badge = card.querySelector('.badge');
+    const bar = card.querySelector('.progress-bar');
+    const panel = card.querySelector('.result-panel');
+
+    log(`📤 Uploading: ${file.name} (${fmtSize(file.size)}, ${type})`);
+
+    try {
+        // ── 1. Upload to S3 via proxy ───────────────────────
+        const s3Key = `uploads/${Date.now()}-${file.name}`;
+        const url = `${S3_BASE}/${BUCKET}/${s3Key}`;
+
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url, true);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.upload.onprogress = ev => {
+                if (ev.lengthComputable) bar.style.width = ((ev.loaded/ev.total)*100)+'%';
+            };
+            xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`S3 HTTP ${xhr.status}`));
+            xhr.onerror = () => reject(new Error('Network error uploading to S3'));
+            xhr.send(file);
+        });
+
+        bar.style.width = '100%';
+        bar.classList.add('done');
+        log(`✅ Uploaded → s3://${BUCKET}/${s3Key}`, 'ok');
+
+        // ── 2. S3 event notification fires file-router automatically ──
+        // We also directly invoke file-processor to show results in the UI
+        // (S3 event → file-router → file-processor happens async in background)
+
+        if (type === 'other') {
+            badge.textContent = 'SKIPPED'; badge.className = 'badge skipped';
+            panel.innerHTML = `<span class="k">⏭️ Skipped:</span> <span class="v">Extension "${e}" is not PDF/image — Lambda pipeline not triggered.</span>`;
+            panel.style.display = 'block';
+            log(`⏭️ ${file.name} skipped — not PDF/image`, 'warn');
+            return;
+        }
+
+        badge.textContent = 'PROCESSING'; badge.className = 'badge processing';
+        log(`⚡ Invoking file-processor for ${file.name}...`);
+
+        // ── 3. Invoke file-processor Lambda through proxy ───
+        const payload = {
+            bucket: BUCKET, key: s3Key, size: file.size,
+            file_type: type, extension: e, source_lambda: 'ui-invoke',
+        };
+
+        const resp = await fetch(`${LAMBDA_BASE}/file-processor/invocations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) throw new Error(`Lambda HTTP ${resp.status}: ${await resp.text()}`);
+
+        const result = await resp.json();
+
+        if (result.status === 'error') {
+            badge.textContent = 'ERROR'; badge.className = 'badge error';
+            bar.classList.remove('done'); bar.classList.add('err');
+            panel.innerHTML = `<span class="k">❌ Error:</span> <span class="v">${result.error}</span>`;
+            panel.style.display = 'block';
+            log(`❌ file-processor error for ${file.name}: ${result.error}`, 'err');
+            return;
+        }
+
+        badge.textContent = 'PROCESSED'; badge.className = 'badge success';
+        panel.innerHTML = renderResult(result);
+        panel.style.display = 'block';
+        log(`🔧 Processed ${file.name} → ${result.processing_result?.formatted_size || 'done'}`, 'ok');
+
+    } catch (err) {
+        bar.classList.add('err');
+        badge.textContent = 'ERROR'; badge.className = 'badge error';
+        const hint = err.message.includes('Network') ? ' (check CORS / LocalStack running)' : '';
+        panel.innerHTML = `<span class="k">❌</span> <span class="v">${err.message}${hint}</span>`;
+        panel.style.display = 'block';
+        log(`❌ ${file.name}: ${err.message}${hint}`, 'err');
+    }
+}
+
+// ── Render Lambda result ────────────────────────────────────
+function renderResult(r) {
+    const fi = r.file_info || {};
+    const pr = r.processing_result || {};
+    const pl = r.pipeline || {};
+    let h = '';
+
+    h += `<span class="h">── File Info ──</span>`;
+    h += `<span class="k">S3 URI:</span> <span class="v">${fi.s3_uri||'-'}</span><br>`;
+    h += `<span class="k">Type:</span> <span class="v">${fi.file_type||'-'}</span><br>`;
+    h += `<span class="k">Content-Type:</span> <span class="v">${fi.content_type||'-'}</span><br>`;
+
+    h += `<span class="h">── Processing Result ──</span>`;
+    h += `<span class="k">Processor:</span> <span class="v">${pr.processor||'-'}</span><br>`;
+    h += `<span class="k">Size:</span> <span class="v">${pr.formatted_size||'-'} (${(pr.raw_size_bytes||0).toLocaleString()} bytes)</span><br>`;
+
+    if (pr.dimensions)  h += `<span class="k">Dimensions:</span> <span class="v">${pr.dimensions} px</span><br>`;
+    if (pr.megapixels)  h += `<span class="k">Megapixels:</span> <span class="v">${pr.megapixels} MP</span><br>`;
+    if (pr.page_count !== undefined) h += `<span class="k">Pages:</span> <span class="v">${pr.page_count}</span><br>`;
+    if (pr.pdf_version) h += `<span class="k">PDF Version:</span> <span class="v">${pr.pdf_version}</span><br>`;
+    if (pr.encrypted !== undefined) h += `<span class="k">Encrypted:</span> <span class="v">${pr.encrypted?'Yes':'No'}</span><br>`;
+    if (pr.title)       h += `<span class="k">Title:</span> <span class="v">${pr.title}</span><br>`;
+    if (pr.author)      h += `<span class="k">Author:</span> <span class="v">${pr.author}</span><br>`;
+
+    h += `<span class="h">── Pipeline ──</span>`;
+    h += `<span class="k">Invoked by:</span> <span class="v">${pl.invoked_by||'-'}</span><br>`;
+    h += `<span class="k">Processor fn:</span> <span class="v">${pl.processor_function||'-'}</span><br>`;
+    h += `<span class="k">Processed at:</span> <span class="v">${pl.processed_at||'-'}</span>`;
+
+    return h;
+}
+</script>
+</body>
+</html>
