@@ -1,21 +1,12 @@
-###############################################################################
-# AWS Document Processing Pipeline — Docker Compose
-# Services: LocalStack (AWS emulator), Elasticsearch, Frontend (nginx)
-###############################################################################
-
 version: '3.8'
 
 services:
-  # ─────────────────────────────────────────────────────────────
-  # LocalStack — Emulates AWS services locally
-  # S3, SQS, Lambda, Step Functions, DynamoDB, API Gateway
-  # ─────────────────────────────────────────────────────────────
   localstack:
-    image: localstack/localstack:3.0
+    image: localstack/localstack
     container_name: docproc-localstack
     ports:
-      - "4566:4566"          # Main edge port (all services)
-      - "4510-4559:4510-4559" # External service ports
+      - "4566:4566"
+      - "4510-4559:4510-4559"
     environment:
       - SERVICES=s3,sqs,lambda,stepfunctions,dynamodb,apigateway,iam,logs
       - DEBUG=1
@@ -35,8 +26,11 @@ services:
     volumes:
       - "./infrastructure/localstack:/etc/localstack/init/ready.d"
       - "./lambdas:/opt/lambdas"
+      - "./step-functions:/opt/lambdas/../step-functions"
       - "${TMPDIR:-/tmp}/localstack:/var/lib/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - docproc-network
     healthcheck:
@@ -45,9 +39,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─────────────────────────────────────────────────────────────
-  # Elasticsearch — Full-text search for extracted documents
-  # ─────────────────────────────────────────────────────────────
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     container_name: docproc-elasticsearch
@@ -59,7 +50,6 @@ services:
       - cluster.name=docproc-cluster
     ports:
       - "9200:9200"
-      - "9300:9300"
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
@@ -70,9 +60,6 @@ services:
       timeout: 10s
       retries: 5
 
-  # ─────────────────────────────────────────────────────────────
-  # Frontend — nginx serving the HTML upload/search interface
-  # ─────────────────────────────────────────────────────────────
   frontend:
     image: nginx:alpine
     container_name: docproc-frontend
@@ -89,9 +76,6 @@ services:
     networks:
       - docproc-network
 
-  # ─────────────────────────────────────────────────────────────
-  # Init — One-shot container to set up Elasticsearch index
-  # ─────────────────────────────────────────────────────────────
   es-init:
     image: curlimages/curl:latest
     container_name: docproc-es-init
@@ -102,35 +86,20 @@ services:
       - docproc-network
     entrypoint: >
       sh -c '
-        echo "Creating Elasticsearch index...";
-        curl -X PUT "http://elasticsearch:9200/documents" -H "Content-Type: application/json" -d "{
-          \"settings\": {
-            \"number_of_shards\": 1,
-            \"number_of_replicas\": 0,
-            \"analysis\": {
-              \"analyzer\": {
-                \"content_analyzer\": {
-                  \"type\": \"standard\",
-                  \"stopwords\": \"_english_\"
-                }
-              }
-            }
-          },
-          \"mappings\": {
-            \"properties\": {
-              \"file_id\":        { \"type\": \"keyword\" },
-              \"filename\":       { \"type\": \"text\", \"fields\": { \"keyword\": { \"type\": \"keyword\" } } },
-              \"content\":        { \"type\": \"text\", \"analyzer\": \"content_analyzer\" },
-              \"file_type\":      { \"type\": \"keyword\" },
-              \"upload_time\":    { \"type\": \"date\" },
-              \"s3_key\":         { \"type\": \"keyword\" },
-              \"extracted_from\": { \"type\": \"keyword\" },
-              \"source_type\":    { \"type\": \"keyword\" }
-            }
-          }
+        curl -s -X PUT "http://elasticsearch:9200/documents" -H "Content-Type: application/json" -d "{
+          \"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},
+          \"mappings\":{\"properties\":{
+            \"file_id\":{\"type\":\"keyword\"},
+            \"filename\":{\"type\":\"text\",\"fields\":{\"keyword\":{\"type\":\"keyword\"}}},
+            \"content\":{\"type\":\"text\",\"analyzer\":\"standard\"},
+            \"file_type\":{\"type\":\"keyword\"},
+            \"upload_time\":{\"type\":\"date\"},
+            \"s3_key\":{\"type\":\"keyword\"},
+            \"extracted_from\":{\"type\":\"keyword\"},
+            \"source_type\":{\"type\":\"keyword\"}
+          }}
         }" 2>/dev/null || true;
-        echo "";
-        echo "Elasticsearch index created successfully!";
+        echo "ES index ready";
       '
 
 volumes:
