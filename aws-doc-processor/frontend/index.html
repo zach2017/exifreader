@@ -9,8 +9,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0a0a0f;--surface:#12121a;--surface-2:#1a1a26;--surface-3:#222233;
-  --border:#2a2a3e;--border-hover:#3d3d5c;
-  --text:#e8e8f0;--text-dim:#8888a0;--text-muted:#55556a;
+  --border:#2a2a3e;--text:#e8e8f0;--text-dim:#8888a0;--text-muted:#55556a;
   --accent:#6c5ce7;--accent-light:#a29bfe;--accent-glow:rgba(108,92,231,.3);
   --success:#00b894;--warning:#fdcb6e;--error:#e17055;--info:#74b9ff;
   --radius:10px;--radius-lg:16px;
@@ -23,124 +22,105 @@ header{display:flex;align-items:center;justify-content:space-between;padding:1re
 .logo-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent-light));border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-size:1.1rem}
 .logo h1{font-size:1.3rem;font-weight:700;background:linear-gradient(135deg,var(--text),var(--accent-light));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .logo span{font-size:.7rem;color:var(--text-muted);letter-spacing:.1em;text-transform:uppercase}
-.health-row{display:flex;gap:.75rem;align-items:center;font-size:.75rem;font-family:var(--mono);color:var(--text-muted)}
-.health-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.health{display:flex;gap:.9rem;align-items:center;font-size:.72rem;font-family:var(--mono);color:var(--text-muted)}
+.hdot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--error)}
 
-/* Tabs */
 .tabs{display:flex;gap:.25rem;background:var(--surface);padding:4px;border-radius:var(--radius);margin-bottom:1.5rem;border:1px solid var(--border)}
-.tab{flex:1;padding:.65rem 1rem;border:none;background:transparent;color:var(--text-dim);font-family:var(--font);font-size:.85rem;font-weight:500;cursor:pointer;border-radius:8px;transition:all .2s;white-space:nowrap}
+.tab{flex:1;padding:.65rem 1rem;border:none;background:0;color:var(--text-dim);font-family:var(--font);font-size:.85rem;font-weight:500;cursor:pointer;border-radius:8px;transition:all .2s;white-space:nowrap}
 .tab:hover{color:var(--text);background:var(--surface-2)}
 .tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 12px var(--accent-glow)}
-.tab-content{display:none}.tab-content.active{display:block;animation:fadeIn .25s ease}
+.tc{display:none}.tc.active{display:block;animation:fadeIn .25s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 
-/* Upload */
-.upload-zone{border:2px dashed var(--border);border-radius:var(--radius-lg);padding:2.5rem 2rem;text-align:center;cursor:pointer;transition:all .3s;background:var(--surface);position:relative;overflow:hidden}
-.upload-zone::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,var(--accent-glow),transparent 70%);opacity:0;transition:opacity .3s}
-.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:var(--surface-2)}
-.upload-zone:hover::before,.upload-zone.dragover::before{opacity:1}
-.upload-icon{font-size:2.5rem;margin-bottom:.75rem;display:block}
-.upload-zone h3{font-size:1rem;margin-bottom:.35rem;position:relative}
-.upload-zone p{color:var(--text-dim);font-size:.8rem;position:relative}
-.upload-zone input{display:none}
-.supported-formats{display:flex;gap:.4rem;justify-content:center;margin-top:.75rem;flex-wrap:wrap;position:relative}
-.format-badge{padding:.2rem .6rem;background:var(--surface-3);border:1px solid var(--border);border-radius:20px;font-size:.65rem;color:var(--text-dim);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em}
-
-/* Progress */
-.upload-progress{margin-top:1.25rem;display:none}.upload-progress.active{display:block}
-.progress-item{display:flex;align-items:center;gap:.75rem;padding:.6rem .85rem;background:var(--surface-2);border-radius:var(--radius);margin-bottom:.4rem;border:1px solid var(--border);font-size:.8rem}
-.progress-bar-wrap{flex:1;height:5px;background:var(--surface-3);border-radius:3px;overflow:hidden}
-.progress-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:3px;transition:width .3s;width:0}
-.progress-name{min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.progress-status{font-family:var(--mono);color:var(--text-dim);min-width:70px;text-align:right;font-size:.75rem}
-
-/* Table */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
-.card-header{display:flex;align-items:center;justify-content:space-between;padding:.85rem 1.25rem;border-bottom:1px solid var(--border)}
-.card-header h3{font-size:.95rem;font-weight:600}
+.card-hdr{display:flex;align-items:center;justify-content:space-between;padding:.85rem 1.25rem;border-bottom:1px solid var(--border)}
+.card-hdr h3{font-size:.95rem;font-weight:600}
 .btn{padding:.45rem .85rem;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);font-family:var(--font);font-size:.78rem;cursor:pointer;transition:all .2s}
 .btn:hover{background:var(--surface-3);border-color:var(--accent)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent-light);box-shadow:0 4px 16px var(--accent-glow)}
+.btn-primary:hover{background:var(--accent-light)}
 .btn-sm{padding:.3rem .6rem;font-size:.72rem}
-.btn-group{display:flex;gap:.3rem}
+.btn-grp{display:flex;gap:.3rem}
+.empty{text-align:center;padding:2.5rem;color:var(--text-muted);font-size:.85rem}
+
+/* Upload */
+.upload-zone{border:2px dashed var(--border);border-radius:var(--radius-lg);padding:2.5rem 2rem;text-align:center;cursor:pointer;transition:all .3s;background:var(--surface)}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:var(--surface-2)}
+.upload-zone h3{font-size:1rem;margin-bottom:.35rem}.upload-zone p{color:var(--text-dim);font-size:.8rem}
+.upload-zone input{display:none}
+.fmts{display:flex;gap:.4rem;justify-content:center;margin-top:.75rem;flex-wrap:wrap}
+.fmt{padding:.2rem .6rem;background:var(--surface-3);border:1px solid var(--border);border-radius:20px;font-size:.65rem;color:var(--text-dim);font-family:var(--mono);text-transform:uppercase}
+.uprog{margin-top:1.25rem;display:none}.uprog.show{display:block}
+.prog{display:flex;align-items:center;gap:.75rem;padding:.6rem .85rem;background:var(--surface-2);border-radius:var(--radius);margin-bottom:.4rem;border:1px solid var(--border);font-size:.8rem}
+.prog-bar-w{flex:1;height:5px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.prog-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:3px;transition:width .3s;width:0}
+.prog-name{min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog-st{font-family:var(--mono);color:var(--text-dim);min-width:70px;text-align:right;font-size:.75rem}
+
+/* Table */
 table{width:100%;border-collapse:collapse}
 thead th{padding:.6rem 1rem;text-align:left;font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;border-bottom:1px solid var(--border);background:var(--surface)}
 tbody td{padding:.7rem 1rem;font-size:.82rem;border-bottom:1px solid rgba(42,42,62,.4);vertical-align:middle}
-tbody tr{transition:background .15s}
-tbody tr:hover{background:var(--surface-2)}
-tbody tr:last-child td{border-bottom:none}
-.status{padding:.2rem .6rem;border-radius:20px;font-size:.67rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;display:inline-flex;align-items:center;gap:.3rem}
+tbody tr{transition:background .15s}tbody tr:hover{background:var(--surface-2)}
+.status{padding:.2rem .6rem;border-radius:20px;font-size:.67rem;font-weight:600;text-transform:uppercase;display:inline-flex;align-items:center;gap:.3rem}
 .status::before{content:'';width:5px;height:5px;border-radius:50%}
 .status-completed{background:rgba(0,184,148,.15);color:var(--success)}.status-completed::before{background:var(--success)}
-.status-processing{background:rgba(116,185,255,.15);color:var(--info)}.status-processing::before{background:var(--info);animation:pulse 1.5s infinite}
+.status-processing{background:rgba(116,185,255,.15);color:var(--info)}.status-processing::before{background:var(--info);animation:blink 1.5s infinite}
 .status-pending{background:rgba(253,203,110,.15);color:var(--warning)}.status-pending::before{background:var(--warning)}
 .status-error{background:rgba(225,112,85,.15);color:var(--error)}.status-error::before{background:var(--error)}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.file-type{display:flex;align-items:center;gap:.5rem}
-.ft-icon{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;font-family:var(--mono);text-transform:uppercase}
-.icon-pdf{background:rgba(225,112,85,.2);color:var(--error)}.icon-doc{background:rgba(116,185,255,.2);color:var(--info)}
-.icon-img{background:rgba(0,184,148,.2);color:var(--success)}.icon-txt{background:rgba(253,203,110,.2);color:var(--warning)}
-.icon-other{background:rgba(136,136,160,.2);color:var(--text-dim)}
-.empty{text-align:center;padding:2.5rem;color:var(--text-muted);font-size:.85rem}
-
-/* Search */
-.search-row{display:flex;gap:.6rem;margin-bottom:1.25rem}
-.search-input{flex:1;padding:.7rem 1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font);font-size:.9rem;outline:none;transition:border-color .2s}
-.search-input:focus{border-color:var(--accent)}.search-input::placeholder{color:var(--text-muted)}
-.search-results{display:flex;flex-direction:column;gap:.6rem}
-.search-result{padding:1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);transition:all .2s;cursor:pointer}
-.search-result:hover{border-color:var(--accent);background:var(--surface-3)}
-.sr-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem}
-.sr-title{font-weight:600;color:var(--accent-light);font-size:.9rem}
-.sr-meta{font-size:.7rem;color:var(--text-muted);font-family:var(--mono)}
-.sr-excerpt{font-size:.82rem;color:var(--text-dim);line-height:1.5}
-.sr-excerpt mark{background:rgba(108,92,231,.3);color:var(--accent-light);padding:.05em .2em;border-radius:3px}
-.search-stats{font-size:.78rem;color:var(--text-muted);margin-bottom:.75rem}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.ft{display:flex;align-items:center;gap:.5rem}
+.ft-i{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;font-family:var(--mono);text-transform:uppercase}
+.i-pdf{background:rgba(225,112,85,.2);color:var(--error)}.i-doc{background:rgba(116,185,255,.2);color:var(--info)}
+.i-img{background:rgba(0,184,148,.2);color:var(--success)}.i-txt{background:rgba(253,203,110,.2);color:var(--warning)}.i-oth{background:rgba(136,136,160,.2);color:var(--text-dim)}
 
 /* SQS Monitor */
-.queue-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin-bottom:1.25rem}
-.queue-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.15rem;transition:border-color .2s}
-.queue-card:hover{border-color:var(--border-hover)}
-.qc-name{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:.35rem;font-family:var(--mono)}
-.qc-count{font-size:1.8rem;font-weight:700;font-family:var(--mono);line-height:1}
-.qc-count.has-msgs{color:var(--warning)}
-.qc-count.empty{color:var(--text-muted)}
-.qc-sub{font-size:.68rem;color:var(--text-muted);margin-top:.25rem}
-.qc-actions{margin-top:.6rem;display:flex;gap:.35rem}
-.log-container{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
-.log-scroll{max-height:480px;overflow-y:auto;padding:0}
-.log-entry{display:flex;gap:.75rem;padding:.55rem 1rem;border-bottom:1px solid rgba(42,42,62,.3);font-size:.78rem;align-items:flex-start}
-.log-entry:last-child{border-bottom:none}
-.log-time{min-width:70px;color:var(--text-muted);font-family:var(--mono);font-size:.7rem;padding-top:.1rem}
-.log-badge{padding:.15rem .5rem;border-radius:4px;font-size:.65rem;font-weight:600;font-family:var(--mono);text-transform:uppercase;white-space:nowrap;min-width:52px;text-align:center}
-.log-badge.sent{background:rgba(108,92,231,.2);color:var(--accent-light)}
-.log-badge.recv{background:rgba(0,184,148,.2);color:var(--success)}
-.log-badge.invoke{background:rgba(116,185,255,.2);color:var(--info)}
-.log-badge.error{background:rgba(225,112,85,.2);color:var(--error)}
-.log-badge.s3{background:rgba(253,203,110,.2);color:var(--warning)}
-.log-msg{flex:1;color:var(--text-dim);word-break:break-word}
-.log-msg strong{color:var(--text);font-weight:500}
+.poller-note{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:.65rem 1rem;margin-bottom:1rem;font-size:.8rem;color:var(--text-dim);display:flex;align-items:center;gap:.5rem}
+.poller-note b{color:var(--success)}
+.q-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.q-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.85rem 1rem}
+.q-name{font-size:.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:.3rem;font-family:var(--mono)}
+.q-num{font-size:1.6rem;font-weight:700;font-family:var(--mono);line-height:1}
+.q-num.has{color:var(--warning)}.q-num.zero{color:var(--text-muted)}
+.q-sub{font-size:.64rem;color:var(--text-muted);margin-top:.2rem}
+.q-act{margin-top:.5rem}
+.log-scroll{max-height:420px;overflow-y:auto}
+.log-e{display:flex;gap:.6rem;padding:.5rem 1rem;border-bottom:1px solid rgba(42,42,62,.3);font-size:.76rem;align-items:flex-start}
+.log-t{min-width:65px;color:var(--text-muted);font-family:var(--mono);font-size:.68rem;padding-top:.1rem}
+.log-b{padding:.12rem .45rem;border-radius:4px;font-size:.63rem;font-weight:600;font-family:var(--mono);text-transform:uppercase;white-space:nowrap;min-width:48px;text-align:center}
+.log-b.sent{background:rgba(108,92,231,.2);color:var(--accent-light)}
+.log-b.recv{background:rgba(0,184,148,.2);color:var(--success)}
+.log-b.s3{background:rgba(253,203,110,.2);color:var(--warning)}
+.log-b.info{background:rgba(136,136,160,.15);color:var(--text-dim)}
+.log-b.poll{background:rgba(116,185,255,.15);color:var(--info)}
+.log-b.error{background:rgba(225,112,85,.2);color:var(--error)}
+.log-m{flex:1;color:var(--text-dim);word-break:break-word}.log-m b{color:var(--text);font-weight:500}
+
+/* Search */
+.s-row{display:flex;gap:.6rem;margin-bottom:1.25rem}
+.s-input{flex:1;padding:.7rem 1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font);font-size:.9rem;outline:none}
+.s-input:focus{border-color:var(--accent)}.s-input::placeholder{color:var(--text-muted)}
+.s-results{display:flex;flex-direction:column;gap:.6rem}
+.s-result{padding:1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s}
+.s-result:hover{border-color:var(--accent)}
+.s-result mark{background:rgba(108,92,231,.3);color:var(--accent-light);padding:.05em .2em;border-radius:3px}
 
 /* Modal */
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center}
-.modal-overlay.active{display:flex}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center}
+.modal-bg.active{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);width:92%;max-width:700px;max-height:82vh;overflow:auto;padding:1.5rem}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem}
-.modal-header h3{font-size:1.05rem}
-.modal-close{width:30px;height:30px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.1rem;transition:all .2s}
-.modal-close:hover{background:var(--error);border-color:var(--error)}
-.modal-body pre{font-family:var(--mono);font-size:.78rem;background:var(--surface-2);padding:1.25rem;border-radius:var(--radius);white-space:pre-wrap;word-break:break-word;line-height:1.6;max-height:50vh;overflow:auto;color:var(--text-dim)}
-.detail-row{display:flex;gap:.75rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.82rem}
-.detail-label{min-width:130px;color:var(--text-muted);font-weight:500}
-.detail-value{color:var(--text);font-family:var(--mono);font-size:.78rem}
+.modal-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem}
+.modal-x{width:30px;height:30px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+.modal-x:hover{background:var(--error)}
+.d-row{display:flex;gap:.75rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.82rem}
+.d-lbl{min-width:130px;color:var(--text-muted);font-weight:500}.d-val{color:var(--text);font-family:var(--mono);font-size:.78rem}
+pre{font-family:var(--mono);font-size:.76rem;background:var(--surface-2);padding:1rem;border-radius:var(--radius);white-space:pre-wrap;word-break:break-word;line-height:1.6;max-height:50vh;overflow:auto;color:var(--text-dim)}
 
-/* Toast */
-.toast-container{position:fixed;bottom:1.5rem;right:1.5rem;z-index:2000;display:flex;flex-direction:column;gap:.4rem}
-.toast{padding:.7rem 1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:.8rem;animation:slideIn .3s ease;display:flex;align-items:center;gap:.4rem;box-shadow:0 8px 32px rgba(0,0,0,.3)}
+.toasts{position:fixed;bottom:1.5rem;right:1.5rem;z-index:2000;display:flex;flex-direction:column;gap:.4rem}
+.toast{padding:.7rem 1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:.8rem;animation:slideIn .3s ease;box-shadow:0 8px 32px rgba(0,0,0,.3)}
 .toast.success{border-color:var(--success)}.toast.error{border-color:var(--error)}.toast.info{border-color:var(--info)}
 @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-@media(max-width:768px){.app{padding:1rem}header{flex-direction:column;gap:.75rem}.tabs{flex-wrap:wrap}.queue-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:768px){.app{padding:1rem}.tabs{flex-wrap:wrap}.q-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -150,9 +130,10 @@ tbody tr:last-child td{border-bottom:none}
       <div class="logo-icon">📄</div>
       <div><h1>DocProc</h1><span>Document Processing Pipeline</span></div>
     </div>
-    <div class="health-row">
-      <span>LocalStack</span><span class="health-dot" id="healthLS" style="background:var(--error)"></span>
-      <span>Elastic</span><span class="health-dot" id="healthES" style="background:var(--error)"></span>
+    <div class="health">
+      LocalStack <span class="hdot" id="hLS"></span>
+      ES <span class="hdot" id="hES"></span>
+      Poller <span class="hdot" id="hPoll"></span>
     </div>
   </header>
 
@@ -163,443 +144,377 @@ tbody tr:last-child td{border-bottom:none}
     <button class="tab" data-tab="search">🔍 Search</button>
   </div>
 
-  <!-- ─── Upload ──────────────────────────── -->
-  <div id="tab-upload" class="tab-content active">
-    <div class="upload-zone" id="uploadZone">
-      <span class="upload-icon">📤</span>
+  <!-- Upload -->
+  <div id="tab-upload" class="tc active">
+    <div class="upload-zone" id="dropZone">
+      <div style="font-size:2.5rem;margin-bottom:.75rem">📤</div>
       <h3>Drop files here or click to browse</h3>
-      <p>Upload documents for automatic text extraction & OCR</p>
-      <div class="supported-formats">
-        <span class="format-badge">PDF</span><span class="format-badge">DOCX</span>
-        <span class="format-badge">PNG</span><span class="format-badge">JPG</span>
-        <span class="format-badge">TIFF</span><span class="format-badge">TXT</span>
-        <span class="format-badge">XLSX</span><span class="format-badge">PPTX</span>
-      </div>
-      <input type="file" id="fileInput" multiple />
+      <p>Files are uploaded to S3, then automatically processed by the poller</p>
+      <div class="fmts"><span class="fmt">PDF</span><span class="fmt">DOCX</span><span class="fmt">PNG</span><span class="fmt">JPG</span><span class="fmt">TIFF</span><span class="fmt">TXT</span><span class="fmt">XLSX</span><span class="fmt">PPTX</span></div>
+      <input type="file" id="fileIn" multiple />
     </div>
-    <div class="upload-progress" id="uploadProgress"></div>
+    <div class="uprog" id="upProg"></div>
   </div>
 
-  <!-- ─── Files ───────────────────────────── -->
-  <div id="tab-files" class="tab-content">
+  <!-- Files -->
+  <div id="tab-files" class="tc">
     <div class="card">
-      <div class="card-header"><h3>Processed Documents</h3><button class="btn" onclick="loadFiles()">↻ Refresh</button></div>
+      <div class="card-hdr"><h3>Processed Documents</h3><button class="btn" onclick="loadFiles()">↻ Refresh</button></div>
       <table><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead>
-      <tbody id="filesBody"><tr><td colspan="6" class="empty">No files yet. Upload something!</td></tr></tbody></table>
+      <tbody id="filesBody"><tr><td colspan="6" class="empty">No files yet — upload something!</td></tr></tbody></table>
     </div>
   </div>
 
-  <!-- ─── SQS Monitor ────────────────────── -->
-  <div id="tab-sqs" class="tab-content">
-    <div class="queue-grid" id="queueGrid"></div>
-    <div class="log-container">
-      <div class="card-header">
-        <h3>📋 Message Log</h3>
-        <div class="btn-group">
-          <button class="btn btn-sm" onclick="SQS.processAll()" title="Read from all queues and invoke Lambdas">⚡ Process All Queues</button>
-          <button class="btn btn-sm" onclick="SQS.clearLog()">Clear</button>
-        </div>
+  <!-- SQS Monitor -->
+  <div id="tab-sqs" class="tc">
+    <div class="poller-note">
+      🔄 The <b>poller</b> container automatically processes messages from all queues.
+      Check <code style="color:var(--accent-light)">docker logs docproc-poller</code> for detailed processing logs.
+    </div>
+    <div class="q-grid" id="qGrid"></div>
+    <div class="card">
+      <div class="card-hdr">
+        <h3>📋 Activity Log</h3>
+        <button class="btn btn-sm" onclick="SQS.clearLog()">Clear</button>
       </div>
       <div class="log-scroll" id="sqsLog">
-        <div class="log-entry"><span class="log-time">—</span><span class="log-badge info">info</span><span class="log-msg">Waiting for messages... Upload a file to see activity here.</span></div>
+        <div class="log-e"><span class="log-t">—</span><span class="log-b info">info</span><span class="log-m">Monitoring SQS queues. Upload a file to see activity.</span></div>
       </div>
     </div>
   </div>
 
-  <!-- ─── Search ──────────────────────────── -->
-  <div id="tab-search" class="tab-content">
+  <!-- Search -->
+  <div id="tab-search" class="tc">
     <div class="card" style="padding:1.25rem">
-      <div class="search-row">
-        <input type="text" class="search-input" id="searchInput" placeholder="Search extracted text..." />
-        <button class="btn btn-primary" onclick="performSearch()">Search</button>
+      <div class="s-row">
+        <input type="text" class="s-input" id="searchIn" placeholder="Search extracted text..." />
+        <button class="btn btn-primary" onclick="doSearch()">Search</button>
       </div>
-      <div class="search-stats" id="searchStats"></div>
-      <div class="search-results" id="searchResults"></div>
+      <div id="searchStats" style="font-size:.78rem;color:var(--text-muted);margin-bottom:.75rem"></div>
+      <div class="s-results" id="searchRes"></div>
     </div>
   </div>
 </div>
 
 <!-- Modal -->
-<div class="modal-overlay" id="viewModal">
+<div class="modal-bg" id="modal">
   <div class="modal">
-    <div class="modal-header"><h3 id="modalTitle">Details</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
-    <div id="modalBody"></div>
+    <div class="modal-hdr"><h3 id="mTitle">Details</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div id="mBody"></div>
   </div>
 </div>
-<div class="toast-container" id="toastContainer"></div>
+<div class="toasts" id="toasts"></div>
 
 <script>
 /* ═══════════════════════════════════════════
-   Configuration
+   Config
+   Browser talks to LocalStack directly on :4566 (CORS disabled)
+   ES goes through nginx proxy at /es/
    ═══════════════════════════════════════════ */
-const CFG = {
-  LS: 'http://localhost:4566',      // LocalStack direct
-  ES: '/es',                         // Elasticsearch via nginx proxy
-  BUCKET: 'docproc-bucket',
-  TABLE: 'document-metadata',
-  QUEUES: ['file-router-queue','text-extract-queue','ocr-queue','file-router-dlq','text-extract-dlq','ocr-dlq'],
-  LAMBDA_MAP: {
-    'file-router-queue':'file-router',
-    'text-extract-queue':'text-extractor',
-    'ocr-queue':'ocr-extractor'
-  },
-  POLL: 4000,
-};
+const LS='http://localhost:4566';
+const ES='/es';
+const BUCKET='docproc-bucket';
+const TABLE='document-metadata';
+const ALL_Q=['file-router-queue','text-extract-queue','ocr-queue','file-router-dlq','text-extract-dlq','ocr-dlq'];
+const POLL_MS=4000;
 
 /* ═══════════════════════════════════════════
    Tabs
    ═══════════════════════════════════════════ */
 document.querySelectorAll('.tab').forEach(t=>{
-  t.addEventListener('click',()=>{
+  t.onclick=()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tc').forEach(x=>x.classList.remove('active'));
     t.classList.add('active');
     document.getElementById('tab-'+t.dataset.tab).classList.add('active');
-    if(t.dataset.tab==='files') loadFiles();
-    if(t.dataset.tab==='sqs') SQS.refresh();
-  });
+    if(t.dataset.tab==='files')loadFiles();
+    if(t.dataset.tab==='sqs')SQS.refresh();
+  };
 });
 
 /* ═══════════════════════════════════════════
-   Health Checks
+   Health — LocalStack, ES, and Poller
    ═══════════════════════════════════════════ */
+let pollerAlive=false; // detect poller by observing queue drain
 async function checkHealth(){
-  try{ const r=await fetch(CFG.LS+'/_localstack/health',{signal:AbortSignal.timeout(3000)});
-    document.getElementById('healthLS').style.background=r.ok?'var(--success)':'var(--error)';
-  }catch{document.getElementById('healthLS').style.background='var(--error)'}
-  try{ const r=await fetch(CFG.ES+'/_cluster/health',{signal:AbortSignal.timeout(3000)});
-    document.getElementById('healthES').style.background=r.ok?'var(--success)':'var(--error)';
-  }catch{document.getElementById('healthES').style.background='var(--error)'}
+  try{const r=await fetch(LS+'/_localstack/health',{signal:AbortSignal.timeout(3000)});
+    document.getElementById('hLS').style.background=r.ok?'var(--success)':'var(--error)';
+  }catch{document.getElementById('hLS').style.background='var(--error)'}
+  try{const r=await fetch(ES+'/_cluster/health',{signal:AbortSignal.timeout(3000)});
+    document.getElementById('hES').style.background=r.ok?'var(--success)':'var(--error)';
+  }catch{document.getElementById('hES').style.background='var(--error)'}
+  // Poller: inferred from queue activity
+  document.getElementById('hPoll').style.background=pollerAlive?'var(--success)':'var(--text-muted)';
 }
-checkHealth(); setInterval(checkHealth,15000);
+checkHealth(); setInterval(checkHealth,12000);
 
 /* ═══════════════════════════════════════════
-   Upload
+   Upload — PUT to S3 directly, then ensure SQS message
    ═══════════════════════════════════════════ */
-const uploadZone=document.getElementById('uploadZone'), fileInput=document.getElementById('fileInput');
-uploadZone.addEventListener('click',()=>fileInput.click());
-uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('dragover')});
-uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('dragover'));
-uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('dragover');handleFiles(e.dataTransfer.files)});
-fileInput.addEventListener('change',()=>handleFiles(fileInput.files));
+const dropZone=document.getElementById('dropZone'),fileIn=document.getElementById('fileIn');
+dropZone.onclick=()=>fileIn.click();
+dropZone.ondragover=e=>{e.preventDefault();dropZone.classList.add('dragover')};
+dropZone.ondragleave=()=>dropZone.classList.remove('dragover');
+dropZone.ondrop=e=>{e.preventDefault();dropZone.classList.remove('dragover');handleFiles(e.dataTransfer.files)};
+fileIn.onchange=()=>handleFiles(fileIn.files);
 
-function genId(){return 'xxxxxxxx'.replace(/x/g,()=>Math.floor(Math.random()*16).toString(16))}
+function gid(){return 'xxxxxxxx'.replace(/x/g,()=>(Math.random()*16|0).toString(16))}
 
 async function handleFiles(files){
-  const pc=document.getElementById('uploadProgress'); pc.classList.add('active');
+  const pc=document.getElementById('upProg');pc.classList.add('show');
   for(const f of files){
-    const fid=genId();
-    const el=document.createElement('div'); el.className='progress-item'; el.id='p-'+fid;
-    el.innerHTML=`<span class="progress-name" title="${f.name}">${f.name}</span><div class="progress-bar-wrap"><div class="progress-bar" id="bar-${fid}"></div></div><span class="progress-status" id="st-${fid}">0%</span>`;
+    const fid=gid();
+    const el=document.createElement('div');el.className='prog';el.id='p-'+fid;
+    el.innerHTML=`<span class="prog-name" title="${f.name}">${f.name}</span><div class="prog-bar-w"><div class="prog-bar" id="bar-${fid}"></div></div><span class="prog-st" id="st-${fid}">0%</span>`;
     pc.appendChild(el);
-    try{ await uploadFile(f,fid); toast('✓ '+f.name+' uploaded','success'); }
-    catch(e){ toast('✗ '+f.name+': '+e.message,'error'); setProgress(fid,0,'Error'); }
+    try{await uploadFile(f,fid);toast('✓ '+f.name+' uploaded','success')}
+    catch(e){toast('✗ '+f.name+': '+e.message,'error');setP(fid,0,'Error')}
   }
-  fileInput.value='';
+  fileIn.value='';
 }
 
-async function uploadFile(file,fid){
+function uploadFile(file,fid){
   const key=`uploads/${fid}/${file.name}`;
-  const url=`${CFG.LS}/${CFG.BUCKET}/${key}`;
-  return new Promise((res,rej)=>{
+  return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest();
-    xhr.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);setProgress(fid,p,p+'%')}};
+    xhr.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);setP(fid,p,p+'%')}};
     xhr.onload=async()=>{
       if(xhr.status>=200&&xhr.status<300){
-        setProgress(fid,100,'Uploaded ✓');
-        SQS.log('s3','S3 PUT <strong>'+file.name+'</strong> → '+key);
-        // Give S3 notification a moment, then check if SQS got the message
-        await sleep(1500);
-        const depth=await SQS.getQueueDepth('file-router-queue');
-        if(depth===0){
-          // S3 notification didn't fire — send SQS message manually as fallback
-          SQS.log('sent','S3 notification did not fire — sending SQS message <strong>manually</strong>');
-          await SQS.sendManualRouterMessage(fid,key,file.name,file.size,file.type);
-        } else {
-          SQS.log('recv','S3 notification delivered to <strong>file-router-queue</strong> (depth: '+depth+')');
+        setP(fid,100,'Uploaded ✓');
+        SQS.log('s3','S3 PUT <b>'+esc(file.name)+'</b> → '+esc(key));
+        // Wait for S3 event notification, then check if SQS got the message
+        await sleep(2000);
+        const before=await SQS.qDepth('file-router-queue');
+        if(before<1){
+          // S3→SQS notification didn't fire → send message manually
+          SQS.log('sent','S3 notification missed — sending <b>manual SQS</b> message');
+          await SQS.sendMsg('file-router-queue',JSON.stringify({
+            Records:[{s3:{bucket:{name:BUCKET},object:{key:key,size:file.size||0}}}]
+          }));
+        }else{
+          SQS.log('recv','S3 notification delivered → <b>file-router-queue</b>');
         }
         SQS.refresh();
-        res();
-      } else rej(new Error('HTTP '+xhr.status));
+        resolve();
+      }else reject(new Error('HTTP '+xhr.status))
     };
-    xhr.onerror=()=>rej(new Error('Network error'));
-    xhr.open('PUT',url);
+    xhr.onerror=()=>reject(new Error('Network error'));
+    xhr.open('PUT',`${LS}/${BUCKET}/${key}`);
     xhr.setRequestHeader('Content-Type',file.type||'application/octet-stream');
     xhr.send(file);
   });
 }
 
-function setProgress(id,pct,txt){
+function setP(id,pct,txt){
   const b=document.getElementById('bar-'+id),s=document.getElementById('st-'+id);
-  if(b)b.style.width=pct+'%'; if(s)s.textContent=txt;
+  if(b)b.style.width=pct+'%';if(s)s.textContent=txt;
 }
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
 /* ═══════════════════════════════════════════
-   SQS Monitor  — the big new module
+   SQS Monitor — read-only monitoring + manual send
+   Processing is done by the poller container.
    ═══════════════════════════════════════════ */
-const SQS = {
-  logEntries: [],
+const SQS={
+  entries:[],
+  prevTotals:{}, // track queue depths to detect poller activity
 
-  // ─── Get queue depth ─────────────────────
-  async getQueueDepth(qname){
+  async qDepth(q){
     try{
-      const url=`${CFG.LS}/000000000000/${qname}?Action=GetQueueAttributes&AttributeName.1=ApproximateNumberOfMessages&AttributeName.2=ApproximateNumberOfMessagesNotVisible`;
-      const r=await fetch(url); const txt=await r.text();
-      const doc=new DOMParser().parseFromString(txt,"text/xml");
-      let count=0; doc.querySelectorAll("Attribute").forEach(a=>{if(a.querySelector("Name")?.textContent==="ApproximateNumberOfMessages")count=parseInt(a.querySelector("Value")?.textContent||"0")}); return count;
+      const r=await fetch(`${LS}/000000000000/${q}?Action=GetQueueAttributes&AttributeName.1=ApproximateNumberOfMessages`);
+      const xml=await r.text();
+      const doc=new DOMParser().parseFromString(xml,'text/xml');
+      let n=0;
+      doc.querySelectorAll('Attribute').forEach(a=>{
+        if((a.querySelector('Name')||{}).textContent==='ApproximateNumberOfMessages')
+          n=parseInt((a.querySelector('Value')||{}).textContent)||0;
+      });
+      return n;
     }catch{return -1}
   },
 
-  // ─── Get attributes for all queues ───────
-  async getAllQueueStats(){
-    const stats=[];
-    for(const q of CFG.QUEUES){
+  async allStats(){
+    const out=[];
+    for(const q of ALL_Q){
       try{
-        const url=`${CFG.LS}/000000000000/${q}?Action=GetQueueAttributes&AttributeName.1=ApproximateNumberOfMessages&AttributeName.2=ApproximateNumberOfMessagesNotVisible&AttributeName.3=ApproximateNumberOfMessagesDelayed`;
-        const r=await fetch(url); const txt=await r.text();
-        const doc=new DOMParser().parseFromString(txt,"text/xml");
-        const getAttr=(aname)=>{let val=0;doc.querySelectorAll("Attribute").forEach(a=>{if(a.querySelector("Name")?.textContent===aname)val=parseInt(a.querySelector("Value")?.textContent||"0")});return val};
-        stats.push({name:q,visible:getAttr("ApproximateNumberOfMessages"),invisible:getAttr("ApproximateNumberOfMessagesNotVisible"),delayed:getAttr("ApproximateNumberOfMessagesDelayed")});
-      }catch{stats.push({name:q,visible:-1,invisible:0,delayed:0})}
+        const r=await fetch(`${LS}/000000000000/${q}?Action=GetQueueAttributes&AttributeName.1=ApproximateNumberOfMessages&AttributeName.2=ApproximateNumberOfMessagesNotVisible`);
+        const xml=await r.text();
+        const doc=new DOMParser().parseFromString(xml,'text/xml');
+        const get=name=>{let v=0;doc.querySelectorAll('Attribute').forEach(a=>{if((a.querySelector('Name')||{}).textContent===name)v=parseInt((a.querySelector('Value')||{}).textContent)||0});return v};
+        out.push({name:q,visible:get('ApproximateNumberOfMessages'),inflight:get('ApproximateNumberOfMessagesNotVisible')});
+      }catch{out.push({name:q,visible:-1,inflight:0})}
     }
-    return stats;
+    return out;
   },
 
-  // ─── Receive messages (peek) ─────────────
-  async receiveMessages(qname,max=5){
+  // Send an SQS message (used as fallback when S3 notification misses)
+  async sendMsg(q,body){
     try{
-      const url=`${CFG.LS}/000000000000/${qname}?Action=ReceiveMessage&MaxNumberOfMessages=${max}&WaitTimeSeconds=1&VisibilityTimeout=30`;
-      const r=await fetch(url); const txt=await r.text();
-      const msgs=[];
-      const parser=new DOMParser(); const doc=parser.parseFromString(txt,'text/xml');
+      await fetch(`${LS}/000000000000/${q}?Action=SendMessage&MessageBody=${encodeURIComponent(body)}`);
+      this.log('sent','→ <b>'+q+'</b>');
+    }catch(e){this.log('error','SQS send failed: '+e.message)}
+  },
+
+  // Peek at messages without consuming (VisibilityTimeout=0)
+  async peek(q){
+    try{
+      const r=await fetch(`${LS}/000000000000/${q}?Action=ReceiveMessage&MaxNumberOfMessages=3&VisibilityTimeout=0`);
+      const xml=await r.text();
+      const doc=new DOMParser().parseFromString(xml,'text/xml');
+      let count=0;
       doc.querySelectorAll('Message').forEach(m=>{
-        msgs.push({
-          id: m.querySelector('MessageId')?.textContent||'',
-          receipt: m.querySelector('ReceiptHandle')?.textContent||'',
-          body: m.querySelector('Body')?.textContent||''
-        });
+        const body=(m.querySelector('Body')||{}).textContent||'';
+        let pretty=body;try{pretty=JSON.stringify(JSON.parse(body),null,2)}catch{}
+        this.log('recv','PEEK: <pre style="margin:.2rem 0;font-size:.68rem;max-height:100px;overflow:auto">'+esc(pretty)+'</pre>');
+        count++;
       });
-      return msgs;
-    }catch(e){console.error('SQS receive error:',e);return []}
+      if(!count)this.log('info','<b>'+q+'</b> is empty');
+    }catch(e){this.log('error','Peek failed: '+e.message)}
   },
 
-  // ─── Delete a message ────────────────────
-  async deleteMessage(qname,receiptHandle){
-    try{
-      const url=`${CFG.LS}/000000000000/${qname}?Action=DeleteMessage&ReceiptHandle=${encodeURIComponent(receiptHandle)}`;
-      await fetch(url);
-    }catch(e){console.error('SQS delete error:',e)}
-  },
-
-  // ─── Send manual router message (fallback) ─
-  async sendManualRouterMessage(fid,key,fname,fsize,ftype){
-    try{
-      const body=JSON.stringify({Records:[{s3:{bucket:{name:CFG.BUCKET},object:{key:key,size:fsize||0}}}]});
-      const url=`${CFG.LS}/000000000000/file-router-queue?Action=SendMessage&MessageBody=${encodeURIComponent(body)}`;
-      await fetch(url);
-      this.log('sent','Manual SQS → <strong>file-router-queue</strong>: '+fname);
-    }catch(e){this.log('error','Failed to send manual SQS: '+e.message)}
-  },
-
-  // ─── Invoke Lambda with SQS payload ──────
-  async invokeLambda(funcName,sqsPayload){
-    try{
-      const payload=JSON.stringify({Records:[{body:typeof sqsPayload==='string'?sqsPayload:JSON.stringify(sqsPayload)}]});
-      const r=await fetch(`${CFG.LS}/2015-03-31/functions/${funcName}/invocations`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','X-Amz-Invocation-Type':'RequestResponse'},
-        body:payload
-      });
-      const result=await r.text();
-      this.log('invoke','Lambda <strong>'+funcName+'</strong> → '+r.status+' '+result.substring(0,120));
-      return {status:r.status,body:result};
-    }catch(e){
-      this.log('error','Lambda <strong>'+funcName+'</strong> failed: '+e.message);
-      return {status:500,body:e.message};
-    }
-  },
-
-  // ─── Process one queue: receive → invoke Lambda → delete ─
-  async processQueue(qname){
-    const funcName=CFG.LAMBDA_MAP[qname];
-    if(!funcName){this.log('error','No Lambda mapped for '+qname);return 0}
-    const msgs=await this.receiveMessages(qname,5);
-    if(msgs.length===0){this.log('info','<strong>'+qname+'</strong> — no messages');return 0}
-    this.log('recv','Received <strong>'+msgs.length+'</strong> message(s) from <strong>'+qname+'</strong>');
-    let processed=0;
-    for(const m of msgs){
-      let bodyPreview='';
-      try{const parsed=JSON.parse(m.body);bodyPreview=parsed.Records?'S3 event: '+JSON.parse(m.body).Records[0]?.s3?.object?.key:m.body.substring(0,100)}catch{bodyPreview=m.body.substring(0,100)}
-      this.log('recv','MSG ['+m.id.substring(0,8)+']: '+bodyPreview);
-      const result=await this.invokeLambda(funcName,m.body);
-      if(result.status>=200&&result.status<300){
-        await this.deleteMessage(qname,m.receipt);
-        this.log('recv','Deleted message '+m.id.substring(0,8)+' from '+qname);
-        processed++;
-      }
-    }
-    return processed;
-  },
-
-  // ─── Process ALL queues ──────────────────
-  async processAll(){
-    this.log('info','⚡ Processing all queues...');
-    let total=0;
-    for(const q of ['file-router-queue','text-extract-queue','ocr-queue']){
-      total+=await this.processQueue(q);
-    }
-    this.log('info','Done. Processed <strong>'+total+'</strong> total message(s).');
-    this.refresh();
-    setTimeout(loadFiles,1000);
-  },
-
-  // ─── Render queue cards ──────────────────
+  // Refresh queue cards + detect poller activity
   async refresh(){
-    const stats=await this.getAllQueueStats();
-    const grid=document.getElementById('queueGrid');
+    const stats=await this.allStats();
+    const grid=document.getElementById('qGrid');
+    
+    // Detect poller: if in-flight > 0 or queues are draining, poller is alive
+    let totalVisible=0, totalInflight=0;
+    stats.forEach(s=>{if(s.visible>0)totalVisible+=s.visible;if(s.inflight>0)totalInflight+=s.inflight});
+    
+    // Check if totals decreased since last check (poller is processing)
+    const prevTotal=this.prevTotals._total||0;
+    const currTotal=totalVisible+totalInflight;
+    if(totalInflight>0||(prevTotal>0&&currTotal<prevTotal)){
+      pollerAlive=true;
+      if(totalInflight>0)this.log('poll','Poller processing — <b>'+totalInflight+'</b> message(s) in-flight');
+    }
+    this.prevTotals._total=currTotal;
+
     grid.innerHTML=stats.map(s=>{
       const isDlq=s.name.includes('dlq');
-      const hasLambda=!!CFG.LAMBDA_MAP[s.name];
-      const total=s.visible+s.invisible;
-      return `<div class="queue-card">
-        <div class="qc-name">${isDlq?'☠ ':'📬 '}${s.name}</div>
-        <div class="qc-count ${total>0?'has-msgs':'empty'}">${s.visible<0?'—':s.visible}</div>
-        <div class="qc-sub">${s.invisible} in-flight · ${s.delayed} delayed</div>
-        ${hasLambda?`<div class="qc-actions"><button class="btn btn-sm" onclick="SQS.processQueue('${s.name}').then(()=>SQS.refresh())">⚡ Process</button><button class="btn btn-sm" onclick="SQS.peekQueue('${s.name}')">👁 Peek</button></div>`:''}
+      return `<div class="q-card">
+        <div class="q-name">${isDlq?'☠ ':'📬 '}${s.name}</div>
+        <div class="q-num ${s.visible>0?'has':'zero'}">${s.visible<0?'—':s.visible}</div>
+        <div class="q-sub">${s.inflight} in-flight</div>
+        ${!isDlq?`<div class="q-act"><button class="btn btn-sm" onclick="SQS.peek('${s.name}')">👁 Peek</button></div>`:''}
       </div>`;
     }).join('');
   },
 
-  // ─── Peek at messages without processing ─
-  async peekQueue(qname){
-    const msgs=await this.receiveMessages(qname,3);
-    if(msgs.length===0){this.log('info','<strong>'+qname+'</strong> — empty');return}
-    for(const m of msgs){
-      let pretty=''; try{pretty=JSON.stringify(JSON.parse(m.body),null,2)}catch{pretty=m.body}
-      this.log('recv','PEEK ['+m.id.substring(0,8)+']: <pre style="margin:.3rem 0;font-size:.7rem;color:var(--text-dim);white-space:pre-wrap;max-height:120px;overflow:auto">'+escapeHtml(pretty)+'</pre>');
-    }
-  },
-
-  // ─── Log entry ───────────────────────────
   log(type,msg){
-    const now=new Date();
-    const time=now.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    this.logEntries.unshift({time,type,msg});
-    if(this.logEntries.length>200) this.logEntries.length=200;
+    const t=new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    this.entries.unshift({t,type,msg});
+    if(this.entries.length>200)this.entries.length=200;
     this.renderLog();
   },
-
   renderLog(){
-    const el=document.getElementById('sqsLog');
-    el.innerHTML=this.logEntries.map(e=>`<div class="log-entry"><span class="log-time">${e.time}</span><span class="log-badge ${e.type}">${e.type}</span><span class="log-msg">${e.msg}</span></div>`).join('');
+    document.getElementById('sqsLog').innerHTML=this.entries.map(e=>`<div class="log-e"><span class="log-t">${e.t}</span><span class="log-b ${e.type}">${e.type}</span><span class="log-m">${e.msg}</span></div>`).join('');
   },
-
-  clearLog(){this.logEntries=[];this.renderLog()}
+  clearLog(){this.entries=[];this.renderLog()}
 };
-
-// Initial render + auto-refresh
 SQS.refresh();
-setInterval(()=>{
-  if(document.querySelector('#tab-sqs.active')) SQS.refresh();
-},CFG.POLL);
+setInterval(()=>SQS.refresh(),POLL_MS);
 
 /* ═══════════════════════════════════════════
-   Files List
+   Files (DynamoDB)
    ═══════════════════════════════════════════ */
 async function loadFiles(){
-  const tbody=document.getElementById('filesBody');
+  const tb=document.getElementById('filesBody');
   try{
-    const r=await fetch(CFG.LS+'/',{method:'POST',headers:{'Content-Type':'application/x-amz-json-1.0','X-Amz-Target':'DynamoDB_20120810.Scan'},body:JSON.stringify({TableName:CFG.TABLE})});
-    const data=await r.json(); const items=(data.Items||[]).map(parseDynamo).sort((a,b)=>new Date(b.upload_time)-new Date(a.upload_time));
-    if(!items.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No files yet</td></tr>';return}
-    tbody.innerHTML=items.map(f=>`<tr>
-      <td><div class="file-type"><div class="ft-icon ${iconCls(f.file_category)}">${iconLbl(f.file_category)}</div><span title="${f.filename}">${trunc(f.filename,28)}</span></div></td>
-      <td style="font-family:var(--mono);font-size:.72rem;color:var(--text-dim)">${f.file_type||f.file_category||'—'}</td>
-      <td style="font-family:var(--mono);font-size:.78rem">${fmtSize(f.file_size)}</td>
+    const r=await fetch(LS+'/',{method:'POST',headers:{'Content-Type':'application/x-amz-json-1.0','X-Amz-Target':'DynamoDB_20120810.Scan'},body:JSON.stringify({TableName:TABLE})});
+    const d=await r.json();
+    const items=(d.Items||[]).map(parseDyn).sort((a,b)=>new Date(b.upload_time||0)-new Date(a.upload_time||0));
+    if(!items.length){tb.innerHTML='<tr><td colspan="6" class="empty">No files yet — upload something!</td></tr>';return}
+    tb.innerHTML=items.map(f=>`<tr>
+      <td><div class="ft"><div class="ft-i ${iCls(f.file_category)}">${iLbl(f.file_category)}</div><span title="${esc(f.filename)}">${trunc(f.filename,28)}</span></div></td>
+      <td style="font-family:var(--mono);font-size:.72rem;color:var(--text-dim)">${esc(f.file_type||f.file_category||'—')}</td>
+      <td style="font-family:var(--mono);font-size:.78rem">${fmtSz(f.file_size)}</td>
       <td><span class="status status-${(f.status||'pending').toLowerCase()}">${f.status||'PENDING'}</span></td>
-      <td style="font-size:.78rem;color:var(--text-dim)">${fmtDate(f.upload_time)}</td>
-      <td><div class="btn-group">
-        <button class="btn btn-sm" onclick="viewDetails('${f.file_id}')">View</button>
-        <button class="btn btn-sm" onclick="download('${f.original_key}')">⬇</button>
-        ${f.extracted_text_key?`<button class="btn btn-sm" onclick="viewText('${f.file_id}','${f.extracted_text_key}')">Text</button>`:''}
+      <td style="font-size:.78rem;color:var(--text-dim)">${fmtDt(f.upload_time)}</td>
+      <td><div class="btn-grp">
+        <button class="btn btn-sm" onclick="viewDetail('${f.file_id}')">View</button>
+        <button class="btn btn-sm" onclick="dl('${f.original_key}')">⬇</button>
+        ${f.extracted_text_key?`<button class="btn btn-sm" onclick="viewTxt('${f.file_id}','${f.extracted_text_key}')">Text</button>`:''}
       </div></td>
     </tr>`).join('');
-  }catch(e){tbody.innerHTML='<tr><td colspan="6" class="empty">Cannot load — is LocalStack running?</td></tr>'}
+  }catch{tb.innerHTML='<tr><td colspan="6" class="empty">Cannot load — is LocalStack running?</td></tr>'}
 }
 
-function parseDynamo(item){const o={};for(const[k,v]of Object.entries(item)){if(v.S)o[k]=v.S;else if(v.N)o[k]=Number(v.N);else if(v.L)o[k]=v.L.map(x=>x.S||x.N||'');else if(v.BOOL!==undefined)o[k]=v.BOOL;else o[k]=JSON.stringify(v)}return o}
+function parseDyn(item){
+  const o={};
+  for(const[k,v]of Object.entries(item)){
+    if(v.S!==undefined)o[k]=v.S;else if(v.N!==undefined)o[k]=Number(v.N);
+    else if(v.L)o[k]=v.L.map(x=>x.S||x.N||JSON.stringify(x));else o[k]=JSON.stringify(v);
+  }
+  return o;
+}
 
 /* ═══════════════════════════════════════════
-   File Details Modal
+   File Detail Modal
    ═══════════════════════════════════════════ */
-async function viewDetails(fid){
+async function viewDetail(fid){
   try{
-    const r=await fetch(CFG.LS+'/',{method:'POST',headers:{'Content-Type':'application/x-amz-json-1.0','X-Amz-Target':'DynamoDB_20120810.GetItem'},body:JSON.stringify({TableName:CFG.TABLE,Key:{file_id:{S:fid}}})});
-    const data=await r.json(); const f=parseDynamo(data.Item||{});
+    const r=await fetch(LS+'/',{method:'POST',headers:{'Content-Type':'application/x-amz-json-1.0','X-Amz-Target':'DynamoDB_20120810.GetItem'},body:JSON.stringify({TableName:TABLE,Key:{file_id:{S:fid}}})});
+    const d=await r.json();const f=parseDyn(d.Item||{});
     const steps=Array.isArray(f.processing_steps)?f.processing_steps:[];
-    const exFiles=Array.isArray(f.extracted_files)?f.extracted_files:[];
-    document.getElementById('modalTitle').textContent=f.filename||fid;
-    document.getElementById('modalBody').innerHTML=`
-      <div class="detail-row"><span class="detail-label">File ID</span><span class="detail-value">${f.file_id}</span></div>
-      <div class="detail-row"><span class="detail-label">Filename</span><span class="detail-value">${f.filename}</span></div>
-      <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value">${f.file_type} (${f.file_category})</span></div>
-      <div class="detail-row"><span class="detail-label">Size</span><span class="detail-value">${fmtSize(f.file_size)}</span></div>
-      <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value"><span class="status status-${(f.status||'').toLowerCase()}">${f.status}</span></span></div>
-      <div class="detail-row"><span class="detail-label">Uploaded</span><span class="detail-value">${f.upload_time}</span></div>
-      <div class="detail-row"><span class="detail-label">S3 Key</span><span class="detail-value">${f.original_key}</span></div>
-      ${f.extracted_text_key?`<div class="detail-row"><span class="detail-label">Extracted Text</span><span class="detail-value">${f.extracted_text_key} <button class="btn btn-sm" onclick="viewText('${f.file_id}','${f.extracted_text_key}')">View</button></span></div>`:''}
-      ${exFiles.length?`<h4 style="margin:1rem 0 .5rem;font-size:.82rem">Extracted Files (${exFiles.length})</h4>${exFiles.map(x=>`<div class="detail-row" style="padding:.25rem 0"><span class="detail-value" style="flex:1;font-size:.72rem">${x}</span><button class="btn btn-sm" onclick="download('${x}')">⬇</button></div>`).join('')}`:''}
-      ${steps.length?`<h4 style="margin:1rem 0 .5rem;font-size:.82rem">Processing Steps</h4><pre>${steps.join('\n')}</pre>`:''}`;
-    document.getElementById('viewModal').classList.add('active');
-  }catch{toast('Failed to load details','error')}
+    const exf=Array.isArray(f.extracted_files)?f.extracted_files:[];
+    document.getElementById('mTitle').textContent=f.filename||fid;
+    document.getElementById('mBody').innerHTML=`
+      <div class="d-row"><span class="d-lbl">File ID</span><span class="d-val">${f.file_id||''}</span></div>
+      <div class="d-row"><span class="d-lbl">Filename</span><span class="d-val">${f.filename||''}</span></div>
+      <div class="d-row"><span class="d-lbl">Type</span><span class="d-val">${f.file_type||''} (${f.file_category||''})</span></div>
+      <div class="d-row"><span class="d-lbl">Size</span><span class="d-val">${fmtSz(f.file_size)}</span></div>
+      <div class="d-row"><span class="d-lbl">Status</span><span class="d-val"><span class="status status-${(f.status||'').toLowerCase()}">${f.status||''}</span></span></div>
+      <div class="d-row"><span class="d-lbl">S3 Key</span><span class="d-val">${f.original_key||''}</span></div>
+      ${f.extracted_text_key?`<div class="d-row"><span class="d-lbl">Extracted Text</span><span class="d-val">${f.extracted_text_key} <button class="btn btn-sm" onclick="viewTxt('${f.file_id}','${f.extracted_text_key}')">View</button></span></div>`:''}
+      ${exf.length?`<h4 style="margin:1rem 0 .5rem;font-size:.82rem">Extracted Files (${exf.length})</h4>${exf.map(x=>`<div class="d-row" style="padding:.25rem 0"><span class="d-val" style="flex:1;font-size:.72rem">${x}</span></div>`).join('')}`:''}
+      ${steps.length?`<h4 style="margin:1rem 0 .5rem;font-size:.82rem">Processing Log</h4><pre>${steps.map(esc).join('\n')}</pre>`:''}`;
+    document.getElementById('modal').classList.add('active');
+  }catch{toast('Failed to load','error')}
 }
-
-async function viewText(fid,key){
+async function viewTxt(fid,key){
   try{
-    const r=await fetch(`${CFG.LS}/${CFG.BUCKET}/${key}`); const txt=await r.text();
-    document.getElementById('modalTitle').textContent='Extracted Text — '+key.split('/').pop();
-    document.getElementById('modalBody').innerHTML=`<pre>${escapeHtml(txt)}</pre>`;
-    document.getElementById('viewModal').classList.add('active');
+    const r=await fetch(`${LS}/${BUCKET}/${key}`);const txt=await r.text();
+    document.getElementById('mTitle').textContent='Extracted Text';
+    document.getElementById('mBody').innerHTML=`<pre>${esc(txt)}</pre>`;
+    document.getElementById('modal').classList.add('active');
   }catch{toast('Failed to load text','error')}
 }
-
-function download(key){const a=document.createElement('a');a.href=`${CFG.LS}/${CFG.BUCKET}/${key}`;a.download=key.split('/').pop();a.click()}
-function closeModal(){document.getElementById('viewModal').classList.remove('active')}
-document.getElementById('viewModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal()});
+function dl(key){if(!key)return;const a=document.createElement('a');a.href=`${LS}/${BUCKET}/${key}`;a.download=key.split('/').pop();a.click()}
+function closeModal(){document.getElementById('modal').classList.remove('active')}
+document.getElementById('modal').onclick=e=>{if(e.target===e.currentTarget)closeModal()};
 
 /* ═══════════════════════════════════════════
-   Search
+   Search (Elasticsearch)
    ═══════════════════════════════════════════ */
-document.getElementById('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')performSearch()});
-
-async function performSearch(){
-  const q=document.getElementById('searchInput').value.trim(); if(!q)return;
-  const rd=document.getElementById('searchResults'),sd=document.getElementById('searchStats');
-  rd.innerHTML='<p style="color:var(--text-muted);text-align:center">Searching...</p>';
+document.getElementById('searchIn').onkeydown=e=>{if(e.key==='Enter')doSearch()};
+async function doSearch(){
+  const q=document.getElementById('searchIn').value.trim();if(!q)return;
+  const rd=document.getElementById('searchRes'),sd=document.getElementById('searchStats');
+  rd.innerHTML='<p class="empty">Searching...</p>';
   try{
-    const r=await fetch(CFG.ES+'/documents/_search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:{multi_match:{query:q,fields:['content','filename^2'],fuzziness:'AUTO'}},highlight:{fields:{content:{fragment_size:200,number_of_fragments:3}},pre_tags:['<mark>'],post_tags:['</mark>']},size:20})});
-    const data=await r.json();const hits=data.hits?.hits||[];const total=data.hits?.total?.value||hits.length;
-    sd.textContent=total+' result'+(total!==1?'s':'')+' in '+(data.took||0)+'ms';
-    if(!hits.length){rd.innerHTML='<p class="empty">No results found</p>';return}
-    rd.innerHTML=hits.map(h=>{const s=h._source;const hl=h.highlight?.content||[];const ex=hl.length?hl.join(' ... '):(s.content||'').substring(0,200)+'...';
-      return `<div class="search-result" onclick="viewDetails('${s.file_id}')"><div class="sr-header"><span class="sr-title">${escapeHtml(s.filename||'')}</span><span class="sr-meta">${s.source_type||s.file_type} · ${fmtDate(s.upload_time)}</span></div><div class="sr-excerpt">${ex}</div></div>`}).join('');
-  }catch(e){rd.innerHTML='<p style="color:var(--error);text-align:center">Search failed</p>';sd.textContent=''}
+    const r=await fetch(ES+'/documents/_search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:{multi_match:{query:q,fields:['content','filename^2'],fuzziness:'AUTO'}},highlight:{fields:{content:{fragment_size:200,number_of_fragments:3}},pre_tags:['<mark>'],post_tags:['</mark>']},size:20})});
+    const d=await r.json();const hits=d.hits?.hits||[];const total=d.hits?.total?.value||hits.length;
+    sd.textContent=total+' result'+(total!==1?'s':'')+' in '+(d.took||0)+'ms';
+    if(!hits.length){rd.innerHTML='<p class="empty">No results</p>';return}
+    rd.innerHTML=hits.map(h=>{const s=h._source;const hl=h.highlight?.content||[];const ex=hl.length?hl.join(' … '):(s.content||'').substring(0,200);
+      return `<div class="s-result" onclick="viewDetail('${s.file_id}')"><div style="display:flex;justify-content:space-between;margin-bottom:.3rem"><b style="color:var(--accent-light);font-size:.9rem">${esc(s.filename||'')}</b><span style="font-size:.7rem;color:var(--text-muted);font-family:var(--mono)">${s.source_type||''}</span></div><div style="font-size:.82rem;color:var(--text-dim)">${ex}</div></div>`}).join('');
+  }catch{rd.innerHTML='<p class="empty" style="color:var(--error)">Search failed</p>';sd.textContent=''}
 }
 
 /* ═══════════════════════════════════════════
    Utilities
    ═══════════════════════════════════════════ */
-function fmtSize(b){if(!b)return'—';const u=['B','KB','MB','GB'];let i=0,s=Number(b);while(s>=1024&&i<3){s/=1024;i++}return s.toFixed(i?1:0)+' '+u[i]}
-function fmtDate(iso){if(!iso)return'—';try{return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}catch{return iso}}
+function fmtSz(b){if(!b)return'—';const u=['B','KB','MB','GB'];let i=0,s=+b;while(s>=1024&&i<3){s/=1024;i++}return s.toFixed(i?1:0)+' '+u[i]}
+function fmtDt(iso){if(!iso)return'—';try{return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}catch{return iso}}
 function trunc(s,n){return s&&s.length>n?s.substring(0,n)+'…':s||''}
-function escapeHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-function iconCls(c){return{pdf:'icon-pdf',word:'icon-doc',image:'icon-img',text:'icon-txt'}[c]||'icon-other'}
-function iconLbl(c){return{pdf:'PDF',word:'DOC',image:'IMG',text:'TXT',spreadsheet:'XLS',presentation:'PPT'}[c]||'FILE'}
-function toast(msg,type='info'){const c=document.getElementById('toastContainer'),t=document.createElement('div');t.className='toast '+type;t.textContent=msg;c.appendChild(t);setTimeout(()=>t.remove(),4000)}
+function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function iCls(c){return{pdf:'i-pdf',word:'i-doc',image:'i-img',text:'i-txt'}[c]||'i-oth'}
+function iLbl(c){return{pdf:'PDF',word:'DOC',image:'IMG',text:'TXT',spreadsheet:'XLS',presentation:'PPT'}[c]||'FILE'}
+function toast(msg,type='info'){const c=document.getElementById('toasts'),t=document.createElement('div');t.className='toast '+type;t.textContent=msg;c.appendChild(t);setTimeout(()=>t.remove(),4000)}
 
-// Auto-refresh files table
-setInterval(()=>{if(document.querySelector('#tab-files.active'))loadFiles()},CFG.POLL);
+// Auto-refresh files + SQS every 4s
+setInterval(()=>{if(document.querySelector('#tab-files.active'))loadFiles()},POLL_MS);
 </script>
 </body>
 </html>
