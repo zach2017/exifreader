@@ -13,13 +13,13 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
-      - PERSISTENCE=1
+      - PERSISTENCE=0
+      # ── CORS — fully permissive for local dev ──
+      - DISABLE_CORS_CHECKS=1
+      - DISABLE_CUSTOM_CORS_S3=1
       - EXTRA_CORS_ALLOWED_ORIGINS=*
       - EXTRA_CORS_ALLOWED_HEADERS=*
       - EXTRA_CORS_EXPOSE_HEADERS=*
-      - DISABLE_CORS_CHECKS=1
-      - DISABLE_CUSTOM_CORS_S3=1
-      - EXTRA_CORS_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
     volumes:
       - "./infrastructure/localstack:/etc/localstack/init/ready.d"
       - "${TMPDIR:-/tmp}/localstack:/var/lib/localstack"
