@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesseract OCR Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['DM Sans', 'sans-serif'],
+                    },
+                    colors: {
+                        ink: '#0a0a0a',
+                        paper: '#f5f0e8',
+                        accent: '#e05a2b',
+                        dim: '#8a8070',
+                        rule: '#d4cdc0',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #f5f0e8; }
+
+        /* Grain overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.03;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            z-index: 9999;
+        }
+
+        /* Upload zone animations */
+        .drop-zone {
+            transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .drop-zone.drag-over {
+            border-color: #e05a2b;
+            background-color: rgba(224, 90, 43, 0.04);
+            transform: scale(1.005);
+        }
+
+        /* Pipeline step dots */
+        .step-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #d4cdc0;
+            transition: all 0.4s ease;
+        }
+        .step-dot.active {
+            background: #e05a2b;
+            box-shadow: 0 0 8px rgba(224, 90, 43, 0.5);
+        }
+        .step-dot.done {
+            background: #2d8a4e;
+        }
+
+        /* Scan line animation */
+        @keyframes scanLine {
+            0% { top: 0; opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { top: 100%; opacity: 1; }
+        }
+        .scan-line {
+            animation: scanLine 2s ease-in-out infinite;
+        }
+
+        /* Pulse animation for processing */
+        @keyframes gentlePulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse-text { animation: gentlePulse 1.5s ease-in-out infinite; }
+
+        /* Fade in for results */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-up {
+            animation: fadeUp 0.5s ease-out forwards;
+        }
+
+        /* Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d4cdc0; border-radius: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #8a8070; }
+    </style>
+</head>
+
+<body class="font-sans text-ink min-h-screen">
+
+    <!-- Header -->
+    <header class="border-b border-rule">
+        <div class="max-w-5xl mx-auto px-6 py-6 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-accent rounded-sm flex items-center justify-center">
+                    <svg class="w-4 h-4 text-paper" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2 4h2v16H2V4zm4 0h2v16H6V4zm5 0h1v16h-1V4zm4 0h2v16h-2V4zm4 0h3v16h-3V4z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-semibold tracking-tight leading-none">Tesseract OCR</h1>
+                    <p class="text-xs text-dim font-mono mt-0.5">S3 → SQS → Lambda pipeline</p>
+                </div>
+            </div>
+            <div id="serviceStatus" class="flex items-center gap-2 text-xs font-mono text-dim">
+                <span class="w-2 h-2 rounded-full bg-rule" id="statusDot"></span>
+                <span id="statusText">checking…</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-10">
+
+        <!-- Upload Section -->
+        <section id="uploadSection">
+            <div
+                id="dropZone"
+                class="drop-zone border-2 border-dashed border-rule rounded-lg p-12 text-center cursor-pointer hover:border-dim transition-colors relative overflow-hidden"
+                onclick="document.getElementById('fileInput').click()"
+            >
+                <input
+                    type="file"
+                    id="fileInput"
+                    class="hidden"
+                    accept="image/*,.pdf"
+                />
+
+                <div id="dropContent">
+                    <div class="w-14 h-14 mx-auto mb-4 rounded-full bg-white border border-rule flex items-center justify-center">
+                        <svg class="w-6 h-6 text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+                        </svg>
+                    </div>
+                    <p class="text-sm font-medium mb-1">Drop a file here or click to browse</p>
+                    <p class="text-xs text-dim font-mono">PNG, JPG, TIFF, BMP, PDF — up to 20 MB</p>
+                </div>
+
+                <!-- File preview (hidden until file chosen) -->
+                <div id="filePreview" class="hidden">
+                    <div class="flex items-center justify-center gap-4">
+                        <div id="thumbContainer" class="w-20 h-20 rounded border border-rule bg-white flex items-center justify-center overflow-hidden">
+                            <img id="thumbImg" class="hidden max-w-full max-h-full object-contain" alt="preview">
+                            <svg id="thumbPdf" class="hidden w-8 h-8 text-accent" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM9 13h2v5H9v-5zm4 0h2v5h-2v-5z"/>
+                            </svg>
+                        </div>
+                        <div class="text-left">
+                            <p id="fileName" class="text-sm font-medium truncate max-w-xs"></p>
+                            <p id="fileSize" class="text-xs text-dim font-mono mt-0.5"></p>
+                            <button
+                                id="clearBtn"
+                                class="text-xs text-accent hover:underline mt-1"
+                                onclick="event.stopPropagation(); clearFile()"
+                            >remove</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scan Button -->
+            <div class="mt-6 flex items-center gap-4">
+                <button
+                    id="scanBtn"
+                    disabled
+                    class="px-6 py-2.5 bg-ink text-paper font-medium text-sm rounded-md
+                           disabled:opacity-30 disabled:cursor-not-allowed
+                           hover:bg-accent transition-colors duration-200"
+                    onclick="startScan()"
+                >
+                    Extract Text
+                </button>
+                <span id="scanHint" class="text-xs text-dim hidden">
+                    File will traverse the full S3 → SQS → Lambda pipeline
+                </span>
+            </div>
+        </section>
+
+        <!-- Pipeline Progress -->
+        <section id="pipelineSection" class="hidden mt-10 fade-up">
+            <div class="border border-rule rounded-lg bg-white p-6 relative overflow-hidden">
+
+                <!-- Scan line effect -->
+                <div id="scanLineEl" class="scan-line absolute left-0 right-0 h-px bg-accent/30 pointer-events-none" style="top:0"></div>
+
+                <div class="flex items-center gap-2 mb-6">
+                    <span class="text-xs font-mono text-dim uppercase tracking-widest">Pipeline</span>
+                    <span id="pipelineStatus" class="text-xs font-mono text-accent pulse-text">processing…</span>
+                </div>
+
+                <!-- Steps -->
+                <div class="grid grid-cols-5 gap-0" id="pipelineSteps">
+                    <div class="step flex flex-col items-center text-center" data-step="upload">
+                        <div class="step-dot" id="dot-upload"></div>
+                        <span class="text-[10px] font-mono text-dim mt-2 uppercase tracking-wider">Upload</span>
+                        <span class="text-[10px] font-mono text-dim mt-0.5" id="time-upload">—</span>
+                    </div>
+                    <div class="step flex flex-col items-center text-center" data-step="s3">
+                        <div class="step-dot" id="dot-s3"></div>
+                        <span class="text-[10px] font-mono text-dim mt-2 uppercase tracking-wider">S3</span>
+                        <span class="text-[10px] font-mono text-dim mt-0.5" id="time-s3">—</span>
+                    </div>
+                    <div class="step flex flex-col items-center text-center" data-step="sqs">
+                        <div class="step-dot" id="dot-sqs"></div>
+                        <span class="text-[10px] font-mono text-dim mt-2 uppercase tracking-wider">SQS</span>
+                        <span class="text-[10px] font-mono text-dim mt-0.5" id="time-sqs">—</span>
+                    </div>
+                    <div class="step flex flex-col items-center text-center" data-step="lambda">
+                        <div class="step-dot" id="dot-lambda"></div>
+                        <span class="text-[10px] font-mono text-dim mt-2 uppercase tracking-wider">Lambda</span>
+                        <span class="text-[10px] font-mono text-dim mt-0.5" id="time-lambda">—</span>
+                    </div>
+                    <div class="step flex flex-col items-center text-center" data-step="done">
+                        <div class="step-dot" id="dot-done"></div>
+                        <span class="text-[10px] font-mono text-dim mt-2 uppercase tracking-wider">Done</span>
+                        <span class="text-[10px] font-mono text-dim mt-0.5" id="time-done">—</span>
+                    </div>
+                </div>
+
+                <!-- Connecting lines between dots -->
+                <div class="absolute top-[33px] left-[10%] right-[10%] h-px bg-rule -z-0"></div>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="resultsSection" class="hidden mt-8 fade-up">
+            <div class="border border-rule rounded-lg bg-white overflow-hidden">
+
+                <!-- Results header -->
+                <div class="border-b border-rule px-6 py-4 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold">Extracted Text</h2>
+                        <p class="text-xs text-dim font-mono mt-0.5">
+                            <span id="resFilename">—</span>
+                            · <span id="resWordCount">0</span> words
+                            · <span id="resCharCount">0</span> chars
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button
+                            onclick="copyText()"
+                            class="px-3 py-1.5 text-xs font-mono border border-rule rounded hover:bg-paper transition-colors"
+                            id="copyBtn"
+                        >
+                            copy
+                        </button>
+                        <button
+                            onclick="downloadText()"
+                            class="px-3 py-1.5 text-xs font-mono border border-rule rounded hover:bg-paper transition-colors"
+                        >
+                            download .txt
+                        </button>
+                        <button
+                            onclick="resetUI()"
+                            class="px-3 py-1.5 text-xs font-mono bg-ink text-paper rounded hover:bg-accent transition-colors"
+                        >
+                            new scan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Extracted text -->
+                <div class="p-6">
+                    <pre
+                        id="extractedText"
+                        class="font-mono text-sm leading-relaxed whitespace-pre-wrap max-h-[500px] overflow-y-auto custom-scroll"
+                    ></pre>
+                </div>
+
+                <!-- Page-level details for PDFs -->
+                <div id="pageDetails" class="hidden border-t border-rule">
+                    <div class="px-6 py-3 flex items-center gap-2 cursor-pointer hover:bg-paper/50" onclick="togglePages()">
+                        <svg id="pageChevron" class="w-4 h-4 text-dim transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+                        </svg>
+                        <span class="text-xs font-mono text-dim uppercase tracking-wider">Per-page breakdown</span>
+                        <span id="pageCount" class="text-xs font-mono text-dim">0 pages</span>
+                    </div>
+                    <div id="pageList" class="hidden px-6 pb-4 space-y-3"></div>
+                </div>
+
+                <!-- Timing stats -->
+                <div class="border-t border-rule px-6 py-4">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4" id="timingGrid">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Error Section -->
+        <section id="errorSection" class="hidden mt-8 fade-up">
+            <div class="border border-red-200 rounded-lg bg-red-50 p-6">
+                <div class="flex items-start gap-3">
+                    <svg class="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/>
+                    </svg>
+                    <div>
+                        <p class="text-sm font-medium text-red-800">Something went wrong</p>
+                        <p id="errorMessage" class="text-xs text-red-600 font-mono mt-1"></p>
+                        <button
+                            onclick="resetUI()"
+                            class="mt-3 px-3 py-1.5 text-xs font-mono border border-red-200 rounded hover:bg-white transition-colors text-red-700"
+                        >
+                            try again
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recent Files -->
+        <section class="mt-12 mb-20">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xs font-mono text-dim uppercase tracking-widest">Recent uploads</h3>
+                <button
+                    onclick="loadFiles()"
+                    class="text-xs font-mono text-dim hover:text-ink transition-colors"
+                >refresh</button>
+            </div>
+            <div id="fileList" class="space-y-1 font-mono text-xs text-dim">
+                <p>No files yet.</p>
+            </div>
+        </section>
+    </main>
+
+    <script>
+    // ── State ──────────────────────────────────────────────────
+    let selectedFile = null;
+    let resultData = null;
+
+    const $ = id => document.getElementById(id);
+
+    // ── File Selection ─────────────────────────────────────────
+    const dropZone = $('dropZone');
+    const fileInput = $('fileInput');
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        dropZone.addEventListener(evt, e => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+        dropZone.addEventListener(evt, e => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+        });
+    });
+    dropZone.addEventListener('drop', e => {
+        const files = e.dataTransfer.files;
+        if (files.length > 0) handleFile(files[0]);
+    });
+    fileInput.addEventListener('change', e => {
+        if (e.target.files.length > 0) handleFile(e.target.files[0]);
+    });
+
+    function handleFile(file) {
+        const maxSize = 20 * 1024 * 1024;
+        if (file.size > maxSize) {
+            showError('File exceeds 20 MB limit.');
+            return;
+        }
+        const validTypes = ['image/png','image/jpeg','image/tiff','image/bmp','image/gif','image/webp','application/pdf'];
+        const ext = file.name.split('.').pop().toLowerCase();
+        const validExts = ['png','jpg','jpeg','tiff','tif','bmp','gif','webp','pdf'];
+        if (!validTypes.includes(file.type) && !validExts.includes(ext)) {
+            showError('Unsupported file type. Use an image or PDF.');
+            return;
+        }
+
+        selectedFile = file;
+        $('dropContent').classList.add('hidden');
+        $('filePreview').classList.remove('hidden');
+        $('fileName').textContent = file.name;
+        $('fileSize').textContent = formatBytes(file.size);
+        $('scanBtn').disabled = false;
+        $('scanHint').classList.remove('hidden');
+
+        // Thumbnail
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                $('thumbImg').src = e.target.result;
+                $('thumbImg').classList.remove('hidden');
+                $('thumbPdf').classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+        } else {
+            $('thumbImg').classList.add('hidden');
+            $('thumbPdf').classList.remove('hidden');
+        }
+    }
+
+    function clearFile() {
+        selectedFile = null;
+        fileInput.value = '';
+        $('dropContent').classList.remove('hidden');
+        $('filePreview').classList.add('hidden');
+        $('scanBtn').disabled = true;
+        $('scanHint').classList.add('hidden');
+    }
+
+    // ── Scan Pipeline ──────────────────────────────────────────
+    async function startScan() {
+        if (!selectedFile) return;
+
+        // Show pipeline, hide others
+        $('pipelineSection').classList.remove('hidden');
+        $('resultsSection').classList.add('hidden');
+        $('errorSection').classList.add('hidden');
+        $('scanBtn').disabled = true;
+        $('pipelineStatus').textContent = 'processing…';
+        $('scanLineEl').style.display = 'block';
+
+        // Reset dots
+        ['upload','s3','sqs','lambda','done'].forEach(s => {
+            $(`dot-${s}`).className = 'step-dot';
+            $(`time-${s}`).textContent = '—';
+        });
+
+        // Activate first dot
+        setStep('upload', 'active');
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        try {
+            setStep('upload', 'active');
+
+            const start = performance.now();
+            const resp = await fetch('/api/scan', { method: 'POST', body: formData });
+            const totalMs = Math.round(performance.now() - start);
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${resp.status}`);
+            }
+
+            const data = await resp.json();
+
+            if (data.error) throw new Error(data.error);
+
+            resultData = data;
+
+            // Animate pipeline steps with timing
+            const p = data.pipeline || {};
+            setStep('upload', 'done');
+            $('time-upload').textContent = 'sent';
+
+            await delay(200);
+            setStep('s3', 'done');
+            $('time-s3').textContent = p.s3_upload_ms ? `${p.s3_upload_ms}ms` : '✓';
+
+            await delay(200);
+            setStep('sqs', 'done');
+            $('time-sqs').textContent = p.sqs_send_ms ? `${p.sqs_send_ms}ms` : '✓';
+
+            await delay(300);
+            setStep('lambda', 'done');
+            $('time-lambda').textContent = p.lambda_invoke_ms ? `${p.lambda_invoke_ms}ms` : '✓';
+
+            await delay(200);
+            setStep('done', 'done');
+            $('time-done').textContent = `${p.total_ms || totalMs}ms`;
+
+            $('pipelineStatus').textContent = 'complete';
+            $('pipelineStatus').classList.remove('pulse-text');
+            $('scanLineEl').style.display = 'none';
+
+            // Show results
+            showResults(data);
+            loadFiles();
+
+        } catch (err) {
+            $('pipelineStatus').textContent = 'failed';
+            $('pipelineStatus').classList.remove('pulse-text');
+            $('pipelineStatus').classList.add('text-red-500');
+            $('scanLineEl').style.display = 'none';
+            showError(err.message);
+        }
+
+        $('scanBtn').disabled = false;
+    }
+
+    function setStep(name, state) {
+        const dot = $(`dot-${name}`);
+        dot.className = `step-dot ${state}`;
+    }
+
+    // ── Results Display ────────────────────────────────────────
+    function showResults(data) {
+        $('resultsSection').classList.remove('hidden');
+        $('resultsSection').classList.add('fade-up');
+
+        $('extractedText').textContent = data.text || '(no text extracted)';
+        $('resFilename').textContent = data.filename || '—';
+
+        const wordCount = data.total_word_count || data.word_count || (data.text ? data.text.split(/\s+/).filter(Boolean).length : 0);
+        const charCount = data.total_char_count || data.text_length || (data.text ? data.text.length : 0);
+        $('resWordCount').textContent = wordCount.toLocaleString();
+        $('resCharCount').textContent = charCount.toLocaleString();
+
+        // Page details for PDFs
+        if (data.pages && data.pages.length > 0) {
+            $('pageDetails').classList.remove('hidden');
+            $('pageCount').textContent = `${data.pages.length} page${data.pages.length !== 1 ? 's' : ''}`;
+            const pageList = $('pageList');
+            pageList.innerHTML = '';
+            data.pages.forEach(pg => {
+                const div = document.createElement('div');
+                div.className = 'border border-rule rounded p-3';
+                div.innerHTML = `
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="font-mono text-xs font-semibold">Page ${pg.page}</span>
+                        <span class="font-mono text-[10px] text-dim">${pg.word_count} words · ${pg.ocr_ms || pg.extraction_time_ms || 0}ms</span>
+                    </div>
+                    <p class="font-mono text-[11px] text-dim leading-relaxed line-clamp-3 whitespace-pre-wrap">${escHtml(pg.text ? pg.text.slice(0, 300) : '(empty)')}</p>
+                `;
+                pageList.appendChild(div);
+            });
+        } else {
+            $('pageDetails').classList.add('hidden');
+        }
+
+        // Timing stats
+        const grid = $('timingGrid');
+        grid.innerHTML = '';
+        const pipeline = data.pipeline || {};
+        const timings = [
+            ['S3 Upload', pipeline.s3_upload_ms],
+            ['SQS Round-trip', pipeline.sqs_send_ms != null && pipeline.sqs_consume_ms != null
+                ? Math.round(pipeline.sqs_send_ms + pipeline.sqs_consume_ms) : null],
+            ['Lambda OCR', pipeline.lambda_invoke_ms],
+            ['Total Pipeline', pipeline.total_ms],
+        ].filter(([, v]) => v != null);
+
+        timings.forEach(([label, ms]) => {
+            const div = document.createElement('div');
+            div.innerHTML = `
+                <p class="text-[10px] font-mono text-dim uppercase tracking-wider">${label}</p>
+                <p class="text-lg font-mono font-semibold mt-0.5">${ms}<span class="text-xs text-dim ml-0.5">ms</span></p>
+            `;
+            grid.appendChild(div);
+        });
+
+        // Scroll to results
+        $('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function togglePages() {
+        const list = $('pageList');
+        const chevron = $('pageChevron');
+        list.classList.toggle('hidden');
+        chevron.style.transform = list.classList.contains('hidden') ? '' : 'rotate(90deg)';
+    }
+
+    // ── Actions ────────────────────────────────────────────────
+    function copyText() {
+        const text = $('extractedText').textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = $('copyBtn');
+            btn.textContent = 'copied!';
+            setTimeout(() => btn.textContent = 'copy', 1500);
+        });
+    }
+
+    function downloadText() {
+        const text = $('extractedText').textContent;
+        const name = (resultData?.filename || 'scan') .replace(/\.[^.]+$/, '') + '_ocr.txt';
+        const blob = new Blob([text], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    function resetUI() {
+        clearFile();
+        $('pipelineSection').classList.add('hidden');
+        $('resultsSection').classList.add('hidden');
+        $('errorSection').classList.add('hidden');
+        $('pipelineStatus').classList.remove('text-red-500');
+        $('pipelineStatus').classList.add('pulse-text');
+        resultData = null;
+    }
+
+    // ── Error ──────────────────────────────────────────────────
+    function showError(msg) {
+        $('errorSection').classList.remove('hidden');
+        $('errorMessage').textContent = msg;
+    }
+
+    // ── Recent Files ───────────────────────────────────────────
+    async function loadFiles() {
+        try {
+            const resp = await fetch('/api/files');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const list = $('fileList');
+
+            if (!data.files || data.files.length === 0) {
+                list.innerHTML = '<p>No files yet.</p>';
+                return;
+            }
+
+            list.innerHTML = data.files.slice(-10).reverse().map(f => {
+                const name = f.key.split('/').pop();
+                return `
+                    <div class="flex items-center justify-between py-1.5 border-b border-rule/50">
+                        <span class="truncate max-w-xs">${escHtml(name)}</span>
+                        <div class="flex items-center gap-3 text-dim">
+                            <span>${formatBytes(f.size)}</span>
+                            <span>${new Date(f.last_modified).toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (e) { /* ignore */ }
+    }
+
+    // ── Service Health ─────────────────────────────────────────
+    async function checkHealth() {
+        try {
+            const resp = await fetch('/api/health');
+            const data = await resp.json();
+            const dot = $('statusDot');
+            const txt = $('statusText');
+            if (data.status === 'ok') {
+                dot.className = 'w-2 h-2 rounded-full bg-green-500';
+                txt.textContent = 'all systems go';
+            } else {
+                dot.className = 'w-2 h-2 rounded-full bg-yellow-500';
+                txt.textContent = 'degraded';
+            }
+        } catch {
+            $('statusDot').className = 'w-2 h-2 rounded-full bg-red-400';
+            $('statusText').textContent = 'offline';
+        }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────
+    function formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // ── Init ───────────────────────────────────────────────────
+    checkHealth();
+    loadFiles();
+    setInterval(checkHealth, 15000);
+    </script>
+</body>
+</html>

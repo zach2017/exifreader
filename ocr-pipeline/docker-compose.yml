@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  # ─── LocalStack: S3 + SQS ───────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: localstack
+    ports:
+      - "4566:4566"       # Gateway endpoint for all services
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=s3,sqs
+      - DEBUG=1
+      - PERSISTENCE=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./init-aws:/etc/localstack/init/ready.d
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── OCR Lambda Service (Tesseract + PyMuPDF) ──────────────────
+  ocr-lambda:
+    build:
+      context: ./lambda
+      dockerfile: Dockerfile
+    container_name: ocr-lambda
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── API Gateway (bridges Frontend ↔ S3 ↔ SQS ↔ Lambda) ──────
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_URL=http://localstack:4566
+      - LAMBDA_URL=http://ocr-lambda:9000
+      - S3_BUCKET=ocr-uploads
+      - SQS_QUEUE=ocr-jobs
+    depends_on:
+      localstack:
+        condition: service_healthy
+      ocr-lambda:
+        condition: service_healthy
+
+  # ─── Frontend (Nginx + static HTML) ────────────────────────────
+  frontend:
+    image: nginx:alpine
+    container_name: frontend
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - gateway
+
+volumes:
+  localstack_data:
