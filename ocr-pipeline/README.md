@@ -1,114 +1,139 @@
-# Tesseract OCR Pipeline — LocalStack + S3 + SQS + Lambda
+# Tesseract OCR — Event-Driven Pipeline
 
-A fully containerized OCR pipeline using Docker Compose with LocalStack (S3 + SQS),
-a Tesseract-based Lambda function, and a polished HTML frontend.
+Fully containerized OCR pipeline using Docker Compose. The Lambda function is **not a running service** — it cold-starts only when a file is uploaded to S3.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Browser  (http://localhost:3000)                               │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  HTML + Tailwind CSS + JavaScript                         │  │
-│  │  Upload file → Display OCR results                        │  │
-│  └─────────────────────┬─────────────────────────────────────┘  │
-└────────────────────────┼────────────────────────────────────────┘
-                         │ POST /api/scan
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Nginx Reverse Proxy  (port 3000)                               │
-│  Static files + /api/ → gateway:8080                            │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  API Gateway  (Flask, port 8080)                                │
-│                                                                 │
-│  1. Upload file ──────────────► S3 Bucket (ocr-uploads)         │
-│  2. Send job message ─────────► SQS Queue (ocr-jobs)            │
-│  3. Consume SQS message                                        │
-│  4. Fetch file from S3                                          │
-│  5. Invoke Lambda ────────────► OCR Lambda (port 9000)          │
-│  6. Return OCR text to browser                                  │
-└─────────────────────────────────────────────────────────────────┘
-                          │                    │
-                          ▼                    ▼
-┌───────────────────────────────┐  ┌──────────────────────────────┐
-│  LocalStack  (port 4566)      │  │  OCR Lambda  (port 9000)     │
-│                               │  │                              │
-│  • S3 bucket: ocr-uploads     │  │  • Tesseract OCR (images)    │
-│  • SQS queue: ocr-jobs        │  │  • PyMuPDF → Tesseract (PDF) │
-│  • S3 → SQS event notify     │  │  • Flask invoke endpoint     │
-└───────────────────────────────┘  └──────────────────────────────┘
+ ┌──────────────┐
+ │   Browser    │  http://localhost:3000
+ │  (HTML/JS)   │
+ └──────┬───────┘
+        │ POST /api/scan
+        ▼
+ ┌──────────────┐     ┌─────────────────────────────────────────────┐
+ │    Nginx     │────▶│  API Gateway  (Flask :8080)                 │
+ │   (:3000)    │     │                                             │
+ └──────────────┘     │  1. Upload file to S3                       │
+                      │  2. Poll S3 results bucket until done       │
+                      │  3. Return OCR text to browser              │
+                      └─────────┬───────────────────────────────────┘
+                                │ put-object
+                                ▼
+                      ┌─────────────────────┐
+                      │  S3: ocr-uploads    │
+                      │    (LocalStack)     │
+                      └─────────┬───────────┘
+                                │ S3 Event Notification (automatic)
+                                ▼
+                      ┌─────────────────────┐
+                      │  SQS: ocr-jobs      │
+                      │    (LocalStack)     │
+                      └─────────┬───────────┘
+                                │ Event Source Mapping (automatic)
+                                ▼
+                      ┌─────────────────────────────────────┐
+                      │  Lambda: ocr-processor              │
+                      │  (Docker image, cold-starts here)   │
+                      │                                     │
+                      │  • Downloads file from S3           │
+                      │  • Tesseract OCR (images)           │
+                      │  • PyMuPDF → Tesseract (PDFs)       │
+                      │  • Writes result JSON to S3         │
+                      └─────────┬───────────────────────────┘
+                                │ put-object
+                                ▼
+                      ┌─────────────────────┐
+                      │  S3: ocr-results    │
+                      │    (LocalStack)     │
+                      └─────────────────────┘
+                                │
+                    Gateway polls this ↑ and returns to browser
 ```
+
+**Key point:** There is no always-running Lambda container. LocalStack manages the Lambda lifecycle — it starts the container when an SQS message arrives and stops it after execution.
 
 ## Quick Start
 
 ```bash
-# Clone / navigate to the project directory
-cd project
-
-# Build and start all services
 docker compose up --build
-
-# Open the UI
-open http://localhost:3000
 ```
 
-The init script automatically creates the S3 bucket, SQS queue, and wires
-S3 event notifications to SQS on startup.
+Then open **http://localhost:3000**
+
+The `init-aws` container automatically:
+- Creates S3 buckets (`ocr-uploads`, `ocr-results`)
+- Creates the SQS queue (`ocr-jobs`)
+- Deploys the Lambda function from the `ocr-lambda:latest` Docker image
+- Wires S3 → SQS event notification
+- Wires SQS → Lambda event source mapping
 
 ## Services
 
-| Service      | Port  | Description                              |
-|-------------|-------|------------------------------------------|
-| `frontend`  | 3000  | Nginx serving HTML + proxying `/api/`    |
-| `gateway`   | 8080  | Flask API bridging S3, SQS, and Lambda   |
-| `ocr-lambda`| 9000  | Tesseract OCR service (image + PDF)      |
-| `localstack`| 4566  | S3 + SQS (with event notifications)      |
+| Service       | Port | Lifecycle     | Description                            |
+|--------------|------|---------------|----------------------------------------|
+| `localstack` | 4566 | Always on     | S3 + SQS + Lambda runtime manager     |
+| `gateway`    | 8080 | Always on     | Flask API (upload + poll for results)  |
+| `frontend`   | 3000 | Always on     | Nginx serving HTML                     |
+| `lambda-build`| —   | Build & exit  | Builds the `ocr-lambda:latest` image   |
+| `init-aws`   | —    | Run & exit    | Deploys AWS resources to LocalStack    |
+| Lambda container | — | **On-demand** | Started by LocalStack, not by Compose  |
 
 ## API Endpoints
 
-| Method | Path           | Description                                     |
-|--------|---------------|-------------------------------------------------|
-| POST   | `/api/scan`    | One-shot: upload → S3 → SQS → Lambda → result  |
-| POST   | `/api/upload`  | Upload file to S3 + enqueue SQS message         |
-| POST   | `/api/process` | Read SQS → fetch S3 → invoke Lambda             |
-| GET    | `/api/health`  | Health check for all services                    |
-| GET    | `/api/queue`   | SQS queue depth                                  |
-| GET    | `/api/files`   | List S3 uploads                                  |
+| Method | Path               | Description                                    |
+|--------|-------------------|------------------------------------------------|
+| POST   | `/api/scan`        | Upload → wait for Lambda → return OCR text     |
+| POST   | `/api/upload`      | Upload to S3 only (async)                      |
+| GET    | `/api/result?key=` | Poll for a specific job's result               |
+| GET    | `/api/health`      | Health check (S3, SQS, Lambda)                 |
+| GET    | `/api/queue`       | SQS queue depth                                |
+| GET    | `/api/files`       | List S3 uploads                                |
+| GET    | `/api/lambda-status` | Lambda function configuration                |
 
 ## Supported File Types
 
-- **Images**: PNG, JPG, JPEG, TIFF, BMP, GIF, WebP
-- **PDF**: Multi-page PDFs (each page rendered at 300 DPI then OCR'd)
-
-## Pipeline Flow
-
-1. **Upload** — File sent from browser to Gateway
-2. **S3 Store** — Gateway stores file in `s3://ocr-uploads/uploads/{job_id}/{filename}`
-3. **SQS Enqueue** — Job message sent to `ocr-jobs` queue
-4. **SQS Consume** — Gateway reads the job message back
-5. **S3 Fetch** — Gateway retrieves the file from S3
-6. **Lambda Invoke** — File sent (base64) to the OCR Lambda
-7. **OCR** — Tesseract extracts text (or PyMuPDF renders PDF pages first)
-8. **Return** — Extracted text + timing metrics returned to browser
+- **Images:** PNG, JPG, JPEG, TIFF, BMP, GIF, WebP
+- **PDF:** Multi-page (each page rendered at 300 DPI, then OCR'd)
 
 ## Troubleshooting
 
 ```bash
-# Check service health
-curl http://localhost:8080/api/health
+# Check all services
+curl http://localhost:8080/api/health | python3 -m json.tool
 
-# List S3 bucket contents
+# Check Lambda state
+curl http://localhost:8080/api/lambda-status | python3 -m json.tool
+
+# View Lambda logs (LocalStack manages the container)
+docker compose logs -f localstack | grep -i lambda
+
+# List S3 contents
 aws --endpoint-url=http://localhost:4566 s3 ls s3://ocr-uploads/ --recursive
+aws --endpoint-url=http://localhost:4566 s3 ls s3://ocr-results/ --recursive
 
-# Check SQS queue depth
+# Manually invoke Lambda for testing
+aws --endpoint-url=http://localhost:4566 lambda invoke \
+    --function-name ocr-processor \
+    --payload '{"Records":[{"body":"{\"Records\":[{\"s3\":{\"bucket\":{\"name\":\"ocr-uploads\"},\"object\":{\"key\":\"uploads/test/sample.png\"}}}]}"}]}' \
+    /dev/stdout
+
+# Check SQS
 aws --endpoint-url=http://localhost:4566 sqs get-queue-attributes \
     --queue-url http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/ocr-jobs \
     --attribute-names All
 
-# View logs
+# View gateway logs
 docker compose logs -f gateway
-docker compose logs -f ocr-lambda
 ```
+
+## How the Cold Start Works
+
+1. You upload a file via the browser
+2. Gateway PUTs the file into `s3://ocr-uploads/uploads/{job_id}/{filename}`
+3. S3 automatically sends an event notification to the `ocr-jobs` SQS queue
+4. The SQS → Lambda event source mapping triggers the `ocr-processor` function
+5. **LocalStack starts the `ocr-lambda:latest` Docker container** (cold start)
+6. Lambda downloads the file from S3, runs Tesseract, writes result to `s3://ocr-results/`
+7. **Container stops after execution**
+8. Gateway polls `s3://ocr-results/` and returns the OCR text to the browser

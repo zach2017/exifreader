@@ -1,44 +1,75 @@
 version: "3.8"
 
+# ─────────────────────────────────────────────────────────────────
+# Architecture:
+#   S3 upload → SQS notification → Lambda trigger (cold start) →
+#   Tesseract OCR → result written to S3 → Gateway polls → Frontend
+#
+# The Lambda is NOT a running service. LocalStack launches the
+# container on-demand when an S3 event fires through SQS.
+# ─────────────────────────────────────────────────────────────────
+
 services:
-  # ─── LocalStack: S3 + SQS ───────────────────────────────────────
+
+  # ─── LocalStack: S3 + SQS + Lambda runtime ─────────────────
   localstack:
-    image: localstack/localstack:3.4
+    image: localstack/localstack
     container_name: localstack
     ports:
-      - "4566:4566"       # Gateway endpoint for all services
-      - "4510-4559:4510-4559"
+      - "4566:4566"
     environment:
-      - SERVICES=s3,sqs
+      - SERVICES=s3,sqs,lambda
       - DEBUG=1
-      - PERSISTENCE=1
+      - PERSISTENCE=0
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - LAMBDA_DOCKER_NETWORK=ocr-net
+      - LAMBDA_DOCKER_FLAGS=-e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1 -e S3_ENDPOINT=http://localstack:4566 -e RESULT_BUCKET=ocr-results
       - AWS_DEFAULT_REGION=us-east-1
     volumes:
       - localstack_data:/var/lib/localstack
-      - ./init-aws:/etc/localstack/init/ready.d
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ocr-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
 
-  # ─── OCR Lambda Service (Tesseract + PyMuPDF) ──────────────────
-  ocr-lambda:
+  # ─── Build-only: builds the Lambda Docker image then exits ──
+  # LocalStack will launch this image on-demand via Docker socket.
+  lambda-build:
     build:
       context: ./lambda
       dockerfile: Dockerfile
-    container_name: ocr-lambda
-    ports:
-      - "9000:9000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    image: ocr-lambda:latest
+    container_name: lambda-build
+    entrypoint: ["echo", "Lambda image built successfully"]
+    networks:
+      - ocr-net
 
-  # ─── API Gateway (bridges Frontend ↔ S3 ↔ SQS ↔ Lambda) ──────
+  # ─── Init: deploys Lambda + wires S3 → SQS → Lambda ────────
+  init-aws:
+    image: localstack/localstack
+    container_name: init-aws
+    entrypoint: /bin/bash
+    command: /opt/init/init.sh
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_URL=http://localstack:4566
+    volumes:
+      - ./init-aws:/opt/init:ro
+    networks:
+      - ocr-net
+    depends_on:
+      localstack:
+        condition: service_healthy
+      lambda-build:
+        condition: service_completed_successfully
+
+  # ─── API Gateway (bridges Frontend ↔ LocalStack) ───────────
   gateway:
     build:
       context: ./gateway
@@ -51,16 +82,18 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_DEFAULT_REGION=us-east-1
       - LOCALSTACK_URL=http://localstack:4566
-      - LAMBDA_URL=http://ocr-lambda:9000
-      - S3_BUCKET=ocr-uploads
+      - UPLOAD_BUCKET=ocr-uploads
+      - RESULT_BUCKET=ocr-results
       - SQS_QUEUE=ocr-jobs
+    networks:
+      - ocr-net
     depends_on:
       localstack:
         condition: service_healthy
-      ocr-lambda:
-        condition: service_healthy
+      init-aws:
+        condition: service_completed_successfully
 
-  # ─── Frontend (Nginx + static HTML) ────────────────────────────
+  # ─── Frontend (Nginx + static HTML) ────────────────────────
   frontend:
     image: nginx:alpine
     container_name: frontend
@@ -69,8 +102,15 @@ services:
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ocr-net
     depends_on:
       - gateway
+
+networks:
+  ocr-net:
+    name: ocr-net
+    driver: bridge
 
 volumes:
   localstack_data:

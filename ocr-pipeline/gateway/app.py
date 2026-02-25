@@ -1,34 +1,39 @@
 """
-API Gateway — bridges the HTML frontend with LocalStack (S3 + SQS) and the OCR Lambda.
+API Gateway — bridges the HTML frontend with LocalStack services.
 
-Flow:
-  1. POST /api/upload   → Upload file to S3, send SQS message
-  2. POST /api/process  → Read SQS message, fetch from S3, invoke Lambda, return OCR text
-  3. POST /api/scan     → One-shot: upload → S3 → SQS → Lambda → return result
-  4. GET  /api/health   → Health check
-  5. GET  /api/queue    → Peek at SQS messages
+The gateway does NOT invoke Lambda directly. Instead:
+  1. Uploads the file to S3  (which triggers S3 → SQS → Lambda automatically)
+  2. Polls the S3 results bucket until Lambda writes the OCR result
+  3. Returns the result to the frontend
+
+Endpoints:
+  POST /api/scan      → Upload to S3, poll for result, return OCR text
+  POST /api/upload    → Upload to S3 only (async — Lambda runs in background)
+  GET  /api/result    → Check/poll for a specific job result
+  GET  /api/health    → Health check
+  GET  /api/queue     → SQS queue depth
+  GET  /api/files     → List S3 uploads
 """
 
-import base64
 import json
 import os
 import time
 import uuid
-from datetime import datetime
 
 import boto3
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 app = Flask(__name__)
 CORS(app)
 
 # ── Config ──────────────────────────────────────────────────────
-LOCALSTACK_URL = os.environ.get("LOCALSTACK_URL", "http://localhost:4566")
-LAMBDA_URL = os.environ.get("LAMBDA_URL", "http://ocr-lambda:9000")
-S3_BUCKET = os.environ.get("S3_BUCKET", "ocr-uploads")
+LOCALSTACK_URL = os.environ.get("LOCALSTACK_URL", "http://localstack:4566")
+UPLOAD_BUCKET = os.environ.get("UPLOAD_BUCKET", "ocr-uploads")
+RESULT_BUCKET = os.environ.get("RESULT_BUCKET", "ocr-results")
 SQS_QUEUE = os.environ.get("SQS_QUEUE", "ocr-jobs")
 REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
@@ -50,32 +55,35 @@ sqs = boto3.client(
     config=boto_config,
 )
 
+lam = boto3.client(
+    "lambda",
+    endpoint_url=LOCALSTACK_URL,
+    aws_access_key_id="test",
+    aws_secret_access_key="test",
+    config=boto_config,
+)
+
 
 def get_queue_url():
-    resp = sqs.get_queue_url(QueueName=SQS_QUEUE)
-    return resp["QueueUrl"]
-
-
-def invoke_lambda(function_name, payload):
-    """Call the OCR Lambda service."""
-    url = f"{LAMBDA_URL}/2015-03-31/functions/{function_name}/invocations"
-    resp = requests.post(url, json=payload, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    return sqs.get_queue_url(QueueName=SQS_QUEUE)["QueueUrl"]
 
 
 # ── Health ──────────────────────────────────────────────────────
 @app.route("/api/health", methods=["GET"])
 def health():
-    """Check health of all services."""
     checks = {}
 
-    # LocalStack
     try:
-        s3.head_bucket(Bucket=S3_BUCKET)
-        checks["s3"] = "ok"
+        s3.head_bucket(Bucket=UPLOAD_BUCKET)
+        checks["s3_uploads"] = "ok"
     except Exception as e:
-        checks["s3"] = f"error: {e}"
+        checks["s3_uploads"] = f"error: {e}"
+
+    try:
+        s3.head_bucket(Bucket=RESULT_BUCKET)
+        checks["s3_results"] = "ok"
+    except Exception as e:
+        checks["s3_results"] = f"error: {e}"
 
     try:
         get_queue_url()
@@ -83,21 +91,21 @@ def health():
     except Exception as e:
         checks["sqs"] = f"error: {e}"
 
-    # Lambda
     try:
-        r = requests.get(f"{LAMBDA_URL}/health", timeout=5)
-        checks["lambda"] = "ok" if r.status_code == 200 else f"status {r.status_code}"
+        resp = lam.get_function(FunctionName="ocr-processor")
+        state = resp["Configuration"]["State"]
+        checks["lambda"] = f"ok ({state})"
     except Exception as e:
         checks["lambda"] = f"error: {e}"
 
-    status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
+    status = "ok" if all("ok" in v for v in checks.values()) else "degraded"
     return jsonify({"status": status, "checks": checks}), 200
 
 
-# ── Upload to S3 + send SQS message ────────────────────────────
+# ── Upload file to S3 (triggers Lambda automatically) ──────────
 @app.route("/api/upload", methods=["POST"])
 def upload():
-    """Upload a file to S3 and enqueue an SQS job."""
+    """Upload to S3. Lambda is triggered automatically via S3 → SQS → Lambda."""
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -107,133 +115,57 @@ def upload():
 
     filename = file.filename
     file_bytes = file.read()
-    file_ext = os.path.splitext(filename)[1].lower()
     job_id = str(uuid.uuid4())
     s3_key = f"uploads/{job_id}/{filename}"
-
-    # Upload to S3
     content_type = file.content_type or "application/octet-stream"
+
+    # Upload to S3 — this triggers the entire pipeline automatically
     s3.put_object(
-        Bucket=S3_BUCKET,
+        Bucket=UPLOAD_BUCKET,
         Key=s3_key,
         Body=file_bytes,
         ContentType=content_type,
         Metadata={"job-id": job_id, "original-filename": filename},
     )
 
-    # Determine which Lambda function to invoke
-    if file_ext == ".pdf":
-        function_name = "pdf-ocr"
-    else:
-        function_name = "ocr-service"
-
-    # Send SQS message
-    queue_url = get_queue_url()
-    message_body = json.dumps({
-        "job_id": job_id,
-        "s3_bucket": S3_BUCKET,
-        "s3_key": s3_key,
-        "filename": filename,
-        "file_type": file_ext,
-        "function_name": function_name,
-        "content_type": content_type,
-        "file_size": len(file_bytes),
-        "timestamp": datetime.utcnow().isoformat(),
-    })
-
-    sqs.send_message(QueueUrl=queue_url, MessageBody=message_body)
+    # The result will appear at this key once Lambda finishes
+    result_key = s3_key.replace("uploads/", "results/", 1) + ".result.json"
 
     return jsonify({
         "job_id": job_id,
         "s3_key": s3_key,
+        "result_key": result_key,
         "filename": filename,
         "file_size": len(file_bytes),
-        "function_name": function_name,
-        "message": "File uploaded to S3 and job queued in SQS",
+        "message": "File uploaded to S3. Lambda will process it automatically via S3 → SQS → Lambda.",
     }), 200
 
 
-# ── Process: read SQS → fetch S3 → invoke Lambda ───────────────
-@app.route("/api/process", methods=["POST"])
-def process():
-    """Read one SQS message, fetch file from S3, invoke Lambda OCR, return result."""
-    data = request.get_json(silent=True) or {}
-    target_job_id = data.get("job_id")
+# ── Poll for result ─────────────────────────────────────────────
+@app.route("/api/result", methods=["GET"])
+def get_result():
+    """Check if Lambda has written the OCR result to S3."""
+    result_key = request.args.get("key")
+    if not result_key:
+        return jsonify({"error": "Missing 'key' query parameter"}), 400
 
-    queue_url = get_queue_url()
-
-    # Poll SQS for matching message
-    msg = None
-    receipt_handle = None
-
-    for _ in range(3):  # retry a few times
-        resp = sqs.receive_message(
-            QueueUrl=queue_url,
-            MaxNumberOfMessages=10,
-            WaitTimeSeconds=2,
-        )
-        messages = resp.get("Messages", [])
-
-        for m in messages:
-            body = json.loads(m["Body"])
-
-            # S3 event notification format (from LocalStack auto-notification)
-            if "Records" in body:
-                # This is the S3 event notification — skip it, we use our custom messages
-                sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=m["ReceiptHandle"])
-                continue
-
-            if target_job_id and body.get("job_id") != target_job_id:
-                continue
-
-            msg = body
-            receipt_handle = m["ReceiptHandle"]
-            break
-
-        if msg:
-            break
-        time.sleep(0.5)
-
-    if not msg:
-        return jsonify({"error": "No matching job found in queue. Try again."}), 404
-
-    # Delete message from queue
-    sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
-
-    # Fetch file from S3
-    s3_key = msg["s3_key"]
-    s3_obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
-    file_bytes = s3_obj["Body"].read()
-    file_b64 = base64.b64encode(file_bytes).decode("utf-8")
-
-    # Build Lambda payload
-    function_name = msg.get("function_name", "ocr-service")
-    filename = msg.get("filename", "unknown")
-
-    if function_name == "pdf-ocr":
-        payload = {"pdf": file_b64, "filename": filename, "dpi": 300}
-    elif function_name == "pdf-extract":
-        payload = {"pdf": file_b64, "filename": filename}
-    else:
-        payload = {"image": file_b64, "filename": filename}
-
-    # Invoke Lambda
-    start = time.time()
-    result = invoke_lambda(function_name, payload)
-    invoke_ms = round((time.time() - start) * 1000, 2)
-
-    result["job_id"] = msg["job_id"]
-    result["s3_key"] = s3_key
-    result["lambda_invoke_ms"] = invoke_ms
-    result["function_name"] = function_name
-
-    return jsonify(result), 200
+    try:
+        obj = s3.get_object(Bucket=RESULT_BUCKET, Key=result_key)
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return jsonify({"status": "complete", "result": data}), 200
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+            return jsonify({"status": "pending"}), 202
+        raise
 
 
-# ── One-shot scan: upload + process in a single request ─────────
+# ── One-shot scan: upload + poll until result ───────────────────
 @app.route("/api/scan", methods=["POST"])
 def scan():
-    """Upload → S3 → SQS → Lambda → return OCR result in one call."""
+    """
+    Upload file to S3, then poll S3 results bucket until Lambda finishes.
+    The Lambda is triggered automatically by: S3 upload → SQS → Lambda.
+    """
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -245,103 +177,94 @@ def scan():
 
     filename = file.filename
     file_bytes = file.read()
-    file_ext = os.path.splitext(filename)[1].lower()
     job_id = str(uuid.uuid4())
     s3_key = f"uploads/{job_id}/{filename}"
     content_type = file.content_type or "application/octet-stream"
 
     # ── Step 1: Upload to S3 ──
-    s3_start = time.time()
+    s3_upload_start = time.time()
     s3.put_object(
-        Bucket=S3_BUCKET,
+        Bucket=UPLOAD_BUCKET,
         Key=s3_key,
         Body=file_bytes,
         ContentType=content_type,
         Metadata={"job-id": job_id, "original-filename": filename},
     )
-    s3_ms = round((time.time() - s3_start) * 1000, 2)
+    s3_upload_ms = round((time.time() - s3_upload_start) * 1000, 2)
+    print(f"[Gateway] Uploaded s3://{UPLOAD_BUCKET}/{s3_key} in {s3_upload_ms}ms")
 
-    # ── Step 2: Send to SQS ──
-    if file_ext == ".pdf":
-        function_name = "pdf-ocr"
-    else:
-        function_name = "ocr-service"
+    # ── Step 2: Poll for result (Lambda is triggered automatically) ──
+    result_key = s3_key.replace("uploads/", "results/", 1) + ".result.json"
 
-    sqs_start = time.time()
-    queue_url = get_queue_url()
-    sqs_message = {
-        "job_id": job_id,
-        "s3_bucket": S3_BUCKET,
-        "s3_key": s3_key,
-        "filename": filename,
-        "function_name": function_name,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-    sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(sqs_message))
-    sqs_ms = round((time.time() - sqs_start) * 1000, 2)
+    print(f"[Gateway] Waiting for result at s3://{RESULT_BUCKET}/{result_key}")
 
-    # ── Step 3: Read from SQS (consume own message) ──
-    consume_start = time.time()
-    consumed = False
-    for _ in range(5):
-        resp = sqs.receive_message(
-            QueueUrl=queue_url, MaxNumberOfMessages=10, WaitTimeSeconds=1
-        )
-        for m in resp.get("Messages", []):
-            body = json.loads(m["Body"])
-            # Skip S3 auto-notifications
-            if "Records" in body:
-                sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=m["ReceiptHandle"])
-                continue
-            if body.get("job_id") == job_id:
-                sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=m["ReceiptHandle"])
-                consumed = True
-                break
-        if consumed:
+    poll_start = time.time()
+    result_data = None
+    max_wait = 90  # seconds
+    poll_interval = 1.0  # seconds
+
+    while (time.time() - poll_start) < max_wait:
+        try:
+            obj = s3.get_object(Bucket=RESULT_BUCKET, Key=result_key)
+            result_data = json.loads(obj["Body"].read().decode("utf-8"))
             break
-    consume_ms = round((time.time() - consume_start) * 1000, 2)
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+                time.sleep(poll_interval)
+                # Increase interval slightly to reduce polling pressure
+                poll_interval = min(poll_interval * 1.1, 3.0)
+                continue
+            raise
 
-    # ── Step 4: Fetch from S3 + invoke Lambda ──
-    fetch_start = time.time()
-    s3_obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
-    file_bytes_from_s3 = s3_obj["Body"].read()
-    file_b64 = base64.b64encode(file_bytes_from_s3).decode("utf-8")
-    fetch_ms = round((time.time() - fetch_start) * 1000, 2)
-
-    if function_name == "pdf-ocr":
-        payload = {"pdf": file_b64, "filename": filename, "dpi": 300}
-    else:
-        payload = {"image": file_b64, "filename": filename}
-
-    lambda_start = time.time()
-    result = invoke_lambda(function_name, payload)
-    lambda_ms = round((time.time() - lambda_start) * 1000, 2)
-
+    poll_ms = round((time.time() - poll_start) * 1000, 2)
     pipeline_ms = round((time.time() - pipeline_start) * 1000, 2)
 
-    result["job_id"] = job_id
-    result["s3_key"] = s3_key
-    result["function_name"] = function_name
-    result["pipeline"] = {
+    if result_data is None:
+        return jsonify({
+            "error": "Timed out waiting for Lambda to process the file. "
+                     "Check docker compose logs for the localstack and lambda containers.",
+            "job_id": job_id,
+            "s3_key": s3_key,
+            "result_key": result_key,
+            "pipeline": {
+                "total_ms": pipeline_ms,
+                "s3_upload_ms": s3_upload_ms,
+                "poll_ms": poll_ms,
+            },
+        }), 504
+
+    # ── Merge pipeline timing into result ──
+    result_data["job_id"] = job_id
+    result_data["s3_key"] = s3_key
+    result_data["pipeline"] = {
         "total_ms": pipeline_ms,
-        "s3_upload_ms": s3_ms,
-        "sqs_send_ms": sqs_ms,
-        "sqs_consume_ms": consume_ms,
-        "s3_fetch_ms": fetch_ms,
-        "lambda_invoke_ms": lambda_ms,
+        "s3_upload_ms": s3_upload_ms,
+        "lambda_cold_start_and_process_ms": poll_ms,
     }
 
-    return jsonify(result), 200
+    # Include Lambda-internal timing if available
+    if "download_ms" in result_data:
+        result_data["pipeline"]["lambda_s3_download_ms"] = result_data["download_ms"]
+    if "total_ocr_ms" in result_data:
+        result_data["pipeline"]["lambda_ocr_ms"] = result_data["total_ocr_ms"]
+    if "result_upload_ms" in result_data:
+        result_data["pipeline"]["lambda_result_upload_ms"] = result_data["result_upload_ms"]
+
+    print(f"[Gateway] Pipeline complete in {pipeline_ms}ms")
+
+    return jsonify(result_data), 200
 
 
 # ── Queue inspector ─────────────────────────────────────────────
 @app.route("/api/queue", methods=["GET"])
 def queue_status():
-    """Peek at SQS queue attributes."""
     queue_url = get_queue_url()
     attrs = sqs.get_queue_attributes(
         QueueUrl=queue_url,
-        AttributeNames=["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"],
+        AttributeNames=[
+            "ApproximateNumberOfMessages",
+            "ApproximateNumberOfMessagesNotVisible",
+        ],
     )["Attributes"]
 
     return jsonify({
@@ -354,8 +277,7 @@ def queue_status():
 # ── List S3 uploads ─────────────────────────────────────────────
 @app.route("/api/files", methods=["GET"])
 def list_files():
-    """List files in the S3 bucket."""
-    resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="uploads/")
+    resp = s3.list_objects_v2(Bucket=UPLOAD_BUCKET, Prefix="uploads/")
     files = []
     for obj in resp.get("Contents", []):
         files.append({
@@ -363,15 +285,37 @@ def list_files():
             "size": obj["Size"],
             "last_modified": obj["LastModified"].isoformat(),
         })
-    return jsonify({"bucket": S3_BUCKET, "files": files}), 200
+    return jsonify({"bucket": UPLOAD_BUCKET, "files": files}), 200
+
+
+# ── Lambda status (for dashboard) ──────────────────────────────
+@app.route("/api/lambda-status", methods=["GET"])
+def lambda_status():
+    try:
+        resp = lam.get_function(FunctionName="ocr-processor")
+        config = resp["Configuration"]
+        return jsonify({
+            "function_name": config["FunctionName"],
+            "state": config.get("State", "Unknown"),
+            "runtime": config.get("PackageType", "Unknown"),
+            "memory_mb": config.get("MemorySize", 0),
+            "timeout_s": config.get("Timeout", 0),
+            "last_modified": config.get("LastModified", ""),
+            "code_size": config.get("CodeSize", 0),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
     print("=" * 60)
     print("  API Gateway running on :8080")
-    print(f"  LocalStack: {LOCALSTACK_URL}")
-    print(f"  Lambda:     {LAMBDA_URL}")
-    print(f"  S3 Bucket:  {S3_BUCKET}")
-    print(f"  SQS Queue:  {SQS_QUEUE}")
+    print(f"  LocalStack:    {LOCALSTACK_URL}")
+    print(f"  Upload bucket: {UPLOAD_BUCKET}")
+    print(f"  Result bucket: {RESULT_BUCKET}")
+    print(f"  SQS queue:     {SQS_QUEUE}")
+    print("")
+    print("  Lambda is NOT running — it starts on S3 upload.")
+    print("  Flow: S3 upload → SQS → Lambda → S3 result")
     print("=" * 60)
     app.run(host="0.0.0.0", port=8080, debug=True)

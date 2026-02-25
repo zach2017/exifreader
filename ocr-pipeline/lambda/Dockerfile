@@ -1,6 +1,6 @@
 FROM python:3.11-slim-bookworm
 
-# Install Tesseract OCR + PDF tools
+# ── Install Tesseract OCR engine + PDF tools ──
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -9,18 +9,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Verify
-RUN tesseract --version && which tesseract
+RUN tesseract --version
 
-# Install Python deps
-RUN pip install --no-cache-dir flask pymupdf
+# ── Python dependencies ──
+RUN pip install --no-cache-dir \
+    pymupdf \
+    boto3 \
+    awslambdaric
 
 WORKDIR /app
-COPY handler.py .
-COPY pdf_handler.py .
-COPY pdf_ocr_handler.py .
-COPY server.py .
+COPY lambda_handler.py .
 
-EXPOSE 9000
-
-CMD ["python", "server.py"]
+# AWS Lambda Runtime Interface Client entrypoint
+ENTRYPOINT ["python", "-m", "awslambdaric"]
+CMD ["lambda_handler.handler"]
