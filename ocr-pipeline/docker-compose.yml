@@ -1,19 +1,20 @@
-version: "3.8"
-
 # ─────────────────────────────────────────────────────────────────
-# Architecture:
-#   S3 upload → SQS notification → Lambda trigger (cold start) →
+# OCR Pipeline — Event-Driven Architecture
+#
+#   S3 upload → SQS notification → Lambda cold start →
 #   Tesseract OCR → result written to S3 → Gateway polls → Frontend
 #
-# The Lambda is NOT a running service. LocalStack launches the
-# container on-demand when an S3 event fires through SQS.
+# Lambda is NOT a running service. LocalStack manages the
+# container lifecycle via Docker socket — cold start on S3 event.
+#
+# init-aws uses AWS CLI v2 (official installer) to deploy resources.
 # ─────────────────────────────────────────────────────────────────
 
 services:
 
   # ─── LocalStack: S3 + SQS + Lambda runtime ─────────────────
   localstack:
-    image: localstack/localstack
+    image: localstack/localstack:latest
     container_name: localstack
     ports:
       - "4566:4566"
@@ -34,10 +35,10 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 5s
       timeout: 5s
-      retries: 15
+      retries: 20
 
   # ─── Build-only: builds the Lambda Docker image then exits ──
-  # LocalStack will launch this image on-demand via Docker socket.
+  # LocalStack launches this image on-demand via Docker socket.
   lambda-build:
     build:
       context: ./lambda
@@ -48,19 +49,19 @@ services:
     networks:
       - ocr-net
 
-  # ─── Init: deploys Lambda + wires S3 → SQS → Lambda ────────
+  # ─── Init: AWS CLI v2 container that deploys resources ──────
+  # Built from its own Dockerfile with official AWS CLI v2.
+  # Runs once, wires S3 → SQS → Lambda, then exits.
   init-aws:
-    image: localstack/localstack
+    build:
+      context: ./init-aws
+      dockerfile: Dockerfile
     container_name: init-aws
-    entrypoint: /bin/bash
-    command: /opt/init/init.sh
     environment:
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_DEFAULT_REGION=us-east-1
       - LOCALSTACK_URL=http://localstack:4566
-    volumes:
-      - ./init-aws:/opt/init:ro
     networks:
       - ocr-net
     depends_on:

@@ -61,22 +61,23 @@ docker compose up --build
 
 Then open **http://localhost:3000**
 
-The `init-aws` container automatically:
+The `init-aws` container (built with **AWS CLI v2**) automatically:
 - Creates S3 buckets (`ocr-uploads`, `ocr-results`)
 - Creates the SQS queue (`ocr-jobs`)
 - Deploys the Lambda function from the `ocr-lambda:latest` Docker image
 - Wires S3 → SQS event notification
 - Wires SQS → Lambda event source mapping
+- Runs a verification step to confirm all resources are live
 
 ## Services
 
 | Service       | Port | Lifecycle     | Description                            |
 |--------------|------|---------------|----------------------------------------|
-| `localstack` | 4566 | Always on     | S3 + SQS + Lambda runtime manager     |
+| `localstack` | 4566 | Always on     | S3 + SQS + Lambda runtime (latest)    |
 | `gateway`    | 8080 | Always on     | Flask API (upload + poll for results)  |
 | `frontend`   | 3000 | Always on     | Nginx serving HTML                     |
 | `lambda-build`| —   | Build & exit  | Builds the `ocr-lambda:latest` image   |
-| `init-aws`   | —    | Run & exit    | Deploys AWS resources to LocalStack    |
+| `init-aws`   | —    | Run & exit    | AWS CLI v2 — deploys resources         |
 | Lambda container | — | **On-demand** | Started by LocalStack, not by Compose  |
 
 ## API Endpoints
