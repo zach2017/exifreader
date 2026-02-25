@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: docproc-localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=s3,sqs,dynamodb
+      - DEBUG=1
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - PERSISTENCE=0
+      # ── CORS — fully permissive for local dev ──
+      - DISABLE_CORS_CHECKS=1
+      - DISABLE_CUSTOM_CORS_S3=1
+      - EXTRA_CORS_ALLOWED_ORIGINS=*
+      - EXTRA_CORS_ALLOWED_HEADERS=*
+      - EXTRA_CORS_EXPOSE_HEADERS=*
+    volumes:
+      - "./infrastructure/localstack:/etc/localstack/init/ready.d"
+      - "${TMPDIR:-/tmp}/localstack:/var/lib/localstack"
+    networks:
+      - docproc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: docproc-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.name=docproc-cluster
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - docproc-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ══════════════════════════════════════════════════════
+  # POLLER — THIS IS WHAT ACTUALLY PROCESSES MESSAGES
+  # ══════════════════════════════════════════════════════
+  # Replaces LocalStack's broken Lambda + event-source-mapping.
+  # Polls SQS queues and directly calls the Lambda handler.py
+  # functions as Python imports. Has ALL dependencies installed.
+  poller:
+    build:
+      context: ./infrastructure/poller
+      dockerfile: Dockerfile
+    container_name: docproc-poller
+    environment:
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - S3_BUCKET=docproc-bucket
+      - DYNAMODB_TABLE=document-metadata
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # file-router needs these to send to downstream queues
+      - TEXT_EXTRACT_QUEUE_URL=http://localstack:4566/000000000000/text-extract-queue
+      - OCR_QUEUE_URL=http://localstack:4566/000000000000/ocr-queue
+      # Step Functions not available locally — PDF falls back to text extraction
+      - STEP_FUNCTION_ARN=arn:aws:states:us-east-1:000000000000:stateMachine:pdf-processing-pipeline
+      - POLL_WAIT=5
+      - STARTUP_DELAY=20
+    volumes:
+      # Mount Lambda code so poller can import handlers directly
+      - "./lambdas:/opt/lambdas:ro"
+    depends_on:
+      localstack:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - docproc-network
+    restart: unless-stopped
+
+  frontend:
+    image: nginx:alpine
+    container_name: docproc-frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - "./frontend:/usr/share/nginx/html:ro"
+      - "./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+    depends_on:
+      localstack:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - docproc-network
+
+  es-init:
+    image: curlimages/curl:latest
+    container_name: docproc-es-init
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - docproc-network
+    restart: "no"
+    entrypoint: >
+      sh -c '
+        sleep 3;
+        curl -s -X PUT "http://elasticsearch:9200/documents" -H "Content-Type: application/json" -d "{
+          \"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},
+          \"mappings\":{\"properties\":{
+            \"file_id\":{\"type\":\"keyword\"},
+            \"filename\":{\"type\":\"text\",\"fields\":{\"keyword\":{\"type\":\"keyword\"}}},
+            \"content\":{\"type\":\"text\",\"analyzer\":\"standard\"},
+            \"file_type\":{\"type\":\"keyword\"},
+            \"upload_time\":{\"type\":\"date\"},
+            \"s3_key\":{\"type\":\"keyword\"},
+            \"extracted_from\":{\"type\":\"keyword\"},
+            \"source_type\":{\"type\":\"keyword\"}
+          }}
+        }" 2>/dev/null;
+        echo "";
+        echo "ES index ready";
+      '
+
+volumes:
+  es-data:
+    driver: local
+
+networks:
+  docproc-network:
+    name: docproc-network
+    driver: bridge

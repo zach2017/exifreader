@@ -1,0 +1,154 @@
+{
+  "Comment": "PDF Processing Pipeline — Extracts images from PDF, routes to OCR and text extraction in parallel. Uses retry/catch for fault tolerance.",
+  "StartAt": "ExtractImagesFromPDF",
+  "States": {
+    "ExtractImagesFromPDF": {
+      "Type": "Task",
+      "Comment": "Downloads the PDF from S3, extracts all embedded images, saves each to S3 under extracted/{file_id}/images/. Returns list of image S3 keys.",
+      "Resource": "arn:aws:lambda:us-east-1:000000000000:function:text-extractor",
+      "Parameters": {
+        "action": "extract_images",
+        "file_id.$": "$.file_id",
+        "s3_key.$": "$.s3_key"
+      },
+      "ResultPath": "$.extraction_result",
+      "TimeoutSeconds": 180,
+      "Next": "CheckImagesExtracted",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed", "Lambda.ServiceException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ProcessingFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "CheckImagesExtracted": {
+      "Type": "Choice",
+      "Comment": "If images were found, run parallel OCR + text extraction. Otherwise, just extract text.",
+      "Choices": [
+        {
+          "Variable": "$.extraction_result.image_count",
+          "NumericGreaterThan": 0,
+          "Next": "ParallelProcessing"
+        }
+      ],
+      "Default": "TextExtractionOnly"
+    },
+
+    "ParallelProcessing": {
+      "Type": "Parallel",
+      "Comment": "Process OCR for images and text extraction for the PDF text layer simultaneously.",
+      "Branches": [
+        {
+          "StartAt": "SendOCRMessages",
+          "States": {
+            "SendOCRMessages": {
+              "Type": "Task",
+              "Comment": "Sends one SQS message per extracted image to the ocr-queue. Each message triggers the OCR Extractor Lambda.",
+              "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-router",
+              "Parameters": {
+                "action": "send_ocr_batch",
+                "file_id.$": "$.file_id",
+                "image_keys.$": "$.extraction_result.image_keys"
+              },
+              "TimeoutSeconds": 30,
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "MaxAttempts": 2,
+                  "IntervalSeconds": 3
+                }
+              ]
+            }
+          }
+        },
+        {
+          "StartAt": "SendTextExtractMessage",
+          "States": {
+            "SendTextExtractMessage": {
+              "Type": "Task",
+              "Comment": "Sends message to text-extract-queue for the PDF text layer. Triggers Text Extractor Lambda.",
+              "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-router",
+              "Parameters": {
+                "action": "send_text_extract",
+                "file_id.$": "$.file_id",
+                "s3_key.$": "$.s3_key"
+              },
+              "TimeoutSeconds": 30,
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "MaxAttempts": 2,
+                  "IntervalSeconds": 3
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.parallel_result",
+      "Next": "MarkProcessing",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ProcessingFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "TextExtractionOnly": {
+      "Type": "Task",
+      "Comment": "No images found — just send to text extraction.",
+      "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-router",
+      "Parameters": {
+        "action": "send_text_extract",
+        "file_id.$": "$.file_id",
+        "s3_key.$": "$.s3_key"
+      },
+      "TimeoutSeconds": 30,
+      "Next": "MarkProcessing",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "MaxAttempts": 2
+        }
+      ]
+    },
+
+    "MarkProcessing": {
+      "Type": "Task",
+      "Comment": "Update DynamoDB status to PROCESSING — actual completion is tracked by individual Lambda handlers.",
+      "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-router",
+      "Parameters": {
+        "action": "update_metadata",
+        "file_id.$": "$.file_id",
+        "status": "PROCESSING"
+      },
+      "End": true
+    },
+
+    "ProcessingFailed": {
+      "Type": "Task",
+      "Comment": "Mark the document as ERROR in DynamoDB. The error details are captured in $.error.",
+      "Resource": "arn:aws:lambda:us-east-1:000000000000:function:file-router",
+      "Parameters": {
+        "action": "update_metadata",
+        "file_id.$": "$.file_id",
+        "status": "ERROR"
+      },
+      "End": true
+    }
+  }
+}
