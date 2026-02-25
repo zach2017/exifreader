@@ -1,13 +1,12 @@
 # ─────────────────────────────────────────────────────────────────
-# OCR Pipeline — Event-Driven Architecture
+# OCR Pipeline — Event-Driven Architecture (LocalStack Community)
 #
 #   S3 upload → SQS notification → Lambda cold start →
 #   Tesseract OCR → result written to S3 → Gateway polls → Frontend
 #
-# Lambda is NOT a running service. LocalStack manages the
-# container lifecycle via Docker socket — cold start on S3 event.
-#
-# init-aws uses AWS CLI v2 (official installer) to deploy resources.
+# Lambda deployment uses zip packages (free) NOT container images
+# (Pro). Tesseract is provided via LAMBDA_RUNTIME_IMAGE_MAPPING
+# which tells LocalStack to use our custom runtime image.
 # ─────────────────────────────────────────────────────────────────
 
 services:
@@ -24,7 +23,10 @@ services:
       - PERSISTENCE=0
       - DOCKER_HOST=unix:///var/run/docker.sock
       - LAMBDA_DOCKER_NETWORK=ocr-net
-      - LAMBDA_DOCKER_FLAGS=-e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1 -e S3_ENDPOINT=http://localstack:4566 -e RESULT_BUCKET=ocr-results
+      # Map python3.11 runtime to our custom image with Tesseract
+      - LAMBDA_RUNTIME_IMAGE_MAPPING={"python3.11":"ocr-lambda-runtime:latest"}
+      # Pass env vars into the Lambda container at invocation time
+      - LAMBDA_DOCKER_FLAGS=-e S3_ENDPOINT=http://localstack:4566 -e RESULT_BUCKET=ocr-results -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
     volumes:
       - localstack_data:/var/lib/localstack
@@ -37,21 +39,21 @@ services:
       timeout: 5s
       retries: 20
 
-  # ─── Build-only: builds the Lambda Docker image then exits ──
-  # LocalStack launches this image on-demand via Docker socket.
+  # ─── Build-only: builds the custom Lambda runtime image ─────
+  # This image provides Tesseract + PyMuPDF + awslambdaric.
+  # LocalStack uses it via LAMBDA_RUNTIME_IMAGE_MAPPING (free).
+  # The handler code is deployed separately as a zip package.
   lambda-build:
     build:
       context: ./lambda
       dockerfile: Dockerfile
-    image: ocr-lambda:latest
+    image: ocr-lambda-runtime:latest
     container_name: lambda-build
-    entrypoint: ["echo", "Lambda image built successfully"]
+    entrypoint: ["echo", "Lambda runtime image built successfully"]
     networks:
       - ocr-net
 
-  # ─── Init: AWS CLI v2 container that deploys resources ──────
-  # Built from its own Dockerfile with official AWS CLI v2.
-  # Runs once, wires S3 → SQS → Lambda, then exits.
+  # ─── Init: AWS CLI v2 — deploys Lambda zip + wires events ──
   init-aws:
     build:
       context: ./init-aws
@@ -62,6 +64,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_DEFAULT_REGION=us-east-1
       - LOCALSTACK_URL=http://localstack:4566
+    volumes:
+      # Mount Lambda handler code so init script can zip and deploy it
+      - ./lambda:/opt/lambda-code:ro
     networks:
       - ocr-net
     depends_on:

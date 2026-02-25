@@ -2,8 +2,14 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────
-# Init script — runs once at startup with AWS CLI v2
-# Creates: S3 buckets, SQS queue, Lambda function, event wiring
+# Init script — AWS CLI v2
+#
+# Deploys Lambda as a ZIP package (LocalStack Community Edition).
+# Container images (--package-type Image) require Pro.
+#
+# The custom runtime image (ocr-lambda-runtime:latest) with
+# Tesseract is used via LAMBDA_RUNTIME_IMAGE_MAPPING set in
+# docker-compose.yml — this is a free feature.
 # ─────────────────────────────────────────────────────────────────
 
 ENDPOINT="${LOCALSTACK_URL:-http://localstack:4566}"
@@ -12,10 +18,12 @@ UPLOAD_BUCKET="ocr-uploads"
 RESULT_BUCKET="ocr-results"
 QUEUE="ocr-jobs"
 LAMBDA_NAME="ocr-processor"
-LAMBDA_IMAGE="ocr-lambda:latest"
 ACCOUNT_ID="000000000000"
 
-# ── AWS CLI v2 wrapper pointing at LocalStack ──
+# Lambda code is mounted from docker-compose volume
+LAMBDA_CODE_DIR="/opt/lambda-code"
+
+# ── AWS CLI v2 wrapper ──
 awsv2() {
     aws --endpoint-url="$ENDPOINT" \
         --region "$REGION" \
@@ -31,37 +39,30 @@ aws --version
 echo "============================================="
 echo ""
 
-# ── [0/6] Wait for LocalStack readiness ──
-echo "[0/6] Waiting for LocalStack at $ENDPOINT ..."
+# ── [0/7] Wait for LocalStack ──
+echo "[0/7] Waiting for LocalStack at $ENDPOINT ..."
 RETRIES=0
 MAX_RETRIES=40
-until curl -sf "${ENDPOINT}/_localstack/health" | jq -e '.services.s3 == "running" or .services.s3 == "available"' > /dev/null 2>&1; do
+until curl -sf "${ENDPOINT}/_localstack/health" | jq -e '
+    (.services.s3 == "running" or .services.s3 == "available") and
+    (.services.sqs == "running" or .services.sqs == "available") and
+    (.services.lambda == "running" or .services.lambda == "available")
+' > /dev/null 2>&1; do
     RETRIES=$((RETRIES + 1))
     if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
-        echo "  ✘ LocalStack did not become ready in time."
+        echo "  ✘ LocalStack did not become ready."
+        curl -sf "${ENDPOINT}/_localstack/health" | jq . || true
         exit 1
     fi
     echo "  waiting… ($RETRIES/$MAX_RETRIES)"
     sleep 3
 done
-
-# Also wait for Lambda service
-until curl -sf "${ENDPOINT}/_localstack/health" | jq -e '.services.lambda == "running" or .services.lambda == "available"' > /dev/null 2>&1; do
-    RETRIES=$((RETRIES + 1))
-    if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
-        echo "  ✘ Lambda service did not become ready."
-        exit 1
-    fi
-    echo "  waiting for lambda service… ($RETRIES/$MAX_RETRIES)"
-    sleep 2
-done
-
-echo "  ✔ LocalStack is ready."
+echo "  ✔ LocalStack is ready (s3, sqs, lambda all running)."
 echo ""
 
-# ── [1/6] Create upload bucket ──
-echo "[1/6] Creating S3 upload bucket: $UPLOAD_BUCKET"
-awsv2 s3api create-bucket --bucket "$UPLOAD_BUCKET" 2>/dev/null || echo "  (already exists)"
+# ── [1/7] Create upload bucket ──
+echo "[1/7] Creating S3 upload bucket: $UPLOAD_BUCKET"
+awsv2 s3api create-bucket --bucket "$UPLOAD_BUCKET" > /dev/null 2>&1 || echo "  (already exists)"
 
 awsv2 s3api put-bucket-cors --bucket "$UPLOAD_BUCKET" --cors-configuration '{
   "CORSRules": [{
@@ -74,18 +75,18 @@ awsv2 s3api put-bucket-cors --bucket "$UPLOAD_BUCKET" --cors-configuration '{
 echo "  ✔ Upload bucket ready."
 echo ""
 
-# ── [2/6] Create results bucket ──
-echo "[2/6] Creating S3 results bucket: $RESULT_BUCKET"
-awsv2 s3api create-bucket --bucket "$RESULT_BUCKET" 2>/dev/null || echo "  (already exists)"
+# ── [2/7] Create results bucket ──
+echo "[2/7] Creating S3 results bucket: $RESULT_BUCKET"
+awsv2 s3api create-bucket --bucket "$RESULT_BUCKET" > /dev/null 2>&1 || echo "  (already exists)"
 echo "  ✔ Results bucket ready."
 echo ""
 
-# ── [3/6] Create SQS queue ──
-echo "[3/6] Creating SQS queue: $QUEUE"
+# ── [3/7] Create SQS queue ──
+echo "[3/7] Creating SQS queue: $QUEUE"
 awsv2 sqs create-queue \
     --queue-name "$QUEUE" \
     --attributes '{"VisibilityTimeout":"120","MessageRetentionPeriod":"3600"}' \
-    > /dev/null 2>/dev/null || echo "  (already exists)"
+    > /dev/null 2>&1 || echo "  (already exists)"
 
 QUEUE_URL=$(awsv2 sqs get-queue-url --queue-name "$QUEUE" | jq -r '.QueueUrl')
 QUEUE_ARN="arn:aws:sqs:${REGION}:${ACCOUNT_ID}:${QUEUE}"
@@ -94,19 +95,46 @@ echo "  ✔ Queue URL: $QUEUE_URL"
 echo "  ✔ Queue ARN: $QUEUE_ARN"
 echo ""
 
-# ── [4/6] Deploy Lambda function from Docker image ──
-echo "[4/6] Creating Lambda function: $LAMBDA_NAME"
-echo "      Image: $LAMBDA_IMAGE"
+# ── [4/7] Package Lambda handler as zip ──
+echo "[4/7] Packaging Lambda handler as zip"
+
+if [ ! -f "${LAMBDA_CODE_DIR}/lambda_handler.py" ]; then
+    echo "  ✘ ERROR: ${LAMBDA_CODE_DIR}/lambda_handler.py not found!"
+    echo "  Make sure ./lambda is mounted at /opt/lambda-code in docker-compose."
+    exit 1
+fi
+
+LAMBDA_ZIP="/tmp/lambda-handler.zip"
+rm -f "$LAMBDA_ZIP"
+
+# Create zip from the handler file (use -j to strip directory path)
+cd "$LAMBDA_CODE_DIR"
+zip -j "$LAMBDA_ZIP" lambda_handler.py
+cd /
+
+ZIP_SIZE=$(stat -c%s "$LAMBDA_ZIP" 2>/dev/null || stat -f%z "$LAMBDA_ZIP" 2>/dev/null || echo "?")
+echo "  ✔ Zip created: $LAMBDA_ZIP ($ZIP_SIZE bytes)"
+echo ""
+
+# ── [5/7] Deploy Lambda function (zip package, NOT container image) ──
+echo "[5/7] Creating Lambda function: $LAMBDA_NAME"
+echo "      Runtime: python3.11 (mapped to ocr-lambda-runtime:latest)"
+echo "      Handler: lambda_handler.handler"
+echo "      Package: zip (Community Edition compatible)"
 
 # Clean up any existing function
-awsv2 lambda delete-function --function-name "$LAMBDA_NAME" > /dev/null 2>/dev/null || true
+awsv2 lambda delete-function --function-name "$LAMBDA_NAME" > /dev/null 2>&1 || true
 sleep 2
 
+# Deploy as zip package with python3.11 runtime
+# LocalStack will use ocr-lambda-runtime:latest for this runtime
+# (set via LAMBDA_RUNTIME_IMAGE_MAPPING in docker-compose)
 awsv2 lambda create-function \
     --function-name "$LAMBDA_NAME" \
-    --package-type Image \
-    --code "ImageUri=$LAMBDA_IMAGE" \
+    --runtime "python3.11" \
+    --handler "lambda_handler.handler" \
     --role "arn:aws:iam::${ACCOUNT_ID}:role/lambda-role" \
+    --zip-file "fileb://${LAMBDA_ZIP}" \
     --timeout 120 \
     --memory-size 1024 \
     --environment "Variables={S3_ENDPOINT=${ENDPOINT},RESULT_BUCKET=${RESULT_BUCKET},AWS_ACCESS_KEY_ID=test,AWS_SECRET_ACCESS_KEY=test,AWS_DEFAULT_REGION=${REGION}}" \
@@ -132,10 +160,9 @@ for i in $(seq 1 30); do
 done
 echo ""
 
-# ── [5/6] Wire S3 → SQS event notification ──
-echo "[5/6] Configuring S3 → SQS event notification"
+# ── [6/7] Wire S3 → SQS event notification ──
+echo "[6/7] Configuring S3 → SQS event notification"
 
-# Using heredoc to avoid shell escaping issues with CLI v2
 NOTIFICATION_CONFIG=$(cat <<EOF
 {
   "QueueConfigurations": [{
@@ -160,8 +187,8 @@ awsv2 s3api put-bucket-notification-configuration \
 echo "  ✔ S3 → SQS notification configured."
 echo ""
 
-# ── [6/6] Wire SQS → Lambda event source mapping ──
-echo "[6/6] Creating SQS → Lambda event source mapping"
+# ── [7/7] Wire SQS → Lambda event source mapping ──
+echo "[7/7] Creating SQS → Lambda event source mapping"
 
 # Delete any existing mappings
 EXISTING_UUIDS=$(awsv2 lambda list-event-source-mappings \
@@ -169,8 +196,8 @@ EXISTING_UUIDS=$(awsv2 lambda list-event-source-mappings \
     | jq -r '.EventSourceMappings[].UUID // empty' 2>/dev/null || true)
 
 for uuid in $EXISTING_UUIDS; do
-    echo "  Deleting old mapping: $uuid"
-    awsv2 lambda delete-event-source-mapping --uuid "$uuid" > /dev/null 2>/dev/null || true
+    echo "  Removing old mapping: $uuid"
+    awsv2 lambda delete-event-source-mapping --uuid "$uuid" > /dev/null 2>&1 || true
 done
 
 awsv2 lambda create-event-source-mapping \
@@ -182,7 +209,7 @@ awsv2 lambda create-event-source-mapping \
 
 echo "  ✔ SQS → Lambda event source mapping created."
 
-# ── Verify everything ──
+# ── Verify ──
 echo ""
 echo "============================================="
 echo "  Verification"
@@ -200,7 +227,9 @@ awsv2 sqs get-queue-url --queue-name "$QUEUE" > /dev/null 2>&1 && echo "✔" || 
 echo -n "  Lambda function:   "
 LAMBDA_STATE=$(awsv2 lambda get-function --function-name "$LAMBDA_NAME" \
     | jq -r '.Configuration.State' 2>/dev/null || echo "NOT FOUND")
-echo "$LAMBDA_STATE"
+LAMBDA_RUNTIME=$(awsv2 lambda get-function --function-name "$LAMBDA_NAME" \
+    | jq -r '.Configuration.Runtime' 2>/dev/null || echo "?")
+echo "$LAMBDA_STATE (runtime: $LAMBDA_RUNTIME)"
 
 echo -n "  Event source map:  "
 ESM_COUNT=$(awsv2 lambda list-event-source-mappings --function-name "$LAMBDA_NAME" \
@@ -210,6 +239,10 @@ echo "${ESM_COUNT} mapping(s)"
 echo ""
 echo "============================================="
 echo "  ✔ All resources initialized!"
+echo ""
+echo "  Lambda is deployed as a zip package."
+echo "  Runtime image: ocr-lambda-runtime:latest"
+echo "  (via LAMBDA_RUNTIME_IMAGE_MAPPING — free)"
 echo ""
 echo "  Pipeline:  S3 upload"
 echo "           → SQS event notification"
