@@ -1,0 +1,98 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════
+#  OCR Document Processor – Docker Compose
+# ══════════════════════════════════════════════
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────
+  postgres:
+    image: postgres:17
+    container_name: ocr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── LocalStack (S3 + Lambda) ────────────────
+  localstack:
+    image: localstack/localstack:latest
+    container_name: ocr-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: s3,lambda
+      DEBUG: 0
+      LAMBDA_EXECUTOR: local
+      LAMBDA_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:-ocr}_default
+      AWS_DEFAULT_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      API_BASE_URL: ${API_BASE_URL}
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./localstack-init:/etc/localstack/init:ro
+      - ./lambda:/opt/lambda:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  # ── OCR API Server (FastAPI + Tesseract) ────
+  api-server:
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
+    container_name: ocr-api-server
+    restart: unless-stopped
+    environment:
+      AWS_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_BUCKET: ${S3_BUCKET}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  # ── Frontend (Nginx + HTML) ─────────────────
+  frontend:
+    image: nginx:1.27-alpine
+    container_name: ocr-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api-server
+
+volumes:
+  pgdata:
+  localstack_data:

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Document Processor</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0b0e14;
+            --surface: #131820;
+            --surface2: #1a2030;
+            --border: #252d3d;
+            --text: #c8d0e0;
+            --text-dim: #6b7a96;
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.15);
+            --green: #4ade80;
+            --red: #f87171;
+            --orange: #fb923c;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .app {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .header p { color: var(--text-dim); font-size: 0.95rem; }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 48px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            background: var(--surface);
+            position: relative;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--accent);
+            background: var(--accent-glow);
+        }
+        .upload-zone svg { margin-bottom: 16px; opacity: 0.5; }
+        .upload-zone h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
+        .upload-zone span { font-size: 0.85rem; color: var(--text-dim); }
+        .upload-zone input { display: none; }
+
+        /* Progress */
+        .upload-progress {
+            margin-top: 24px;
+            display: none;
+        }
+        .upload-progress.active { display: block; }
+        .progress-bar {
+            height: 4px;
+            background: var(--surface2);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+        .progress-text {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            margin-top: 8px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Document List */
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 40px 0 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title .count {
+            background: var(--surface2);
+            padding: 2px 10px;
+            border-radius: 99px;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .doc-list { display: flex; flex-direction: column; gap: 8px; }
+
+        .doc-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .doc-card:hover { border-color: var(--accent); background: var(--surface2); }
+
+        .doc-info h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 500px;
+        }
+        .doc-meta {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .badge {
+            padding: 4px 12px;
+            border-radius: 99px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge.completed { background: rgba(74, 222, 128, 0.12); color: var(--green); }
+        .badge.processing { background: rgba(251, 146, 60, 0.12); color: var(--orange); }
+        .badge.pending { background: rgba(107, 122, 150, 0.12); color: var(--text-dim); }
+        .badge.failed { background: rgba(248, 113, 113, 0.12); color: var(--red); }
+
+        .word-count {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+            min-width: 80px;
+            text-align: right;
+        }
+
+        /* Detail Panel */
+        .detail-panel {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-top: 16px;
+            overflow: hidden;
+        }
+        .detail-panel.active { display: block; }
+        .detail-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .detail-header h3 { font-size: 0.95rem; font-weight: 600; }
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 4px;
+        }
+        .close-btn:hover { color: var(--text); }
+        .detail-body {
+            padding: 20px;
+        }
+        .extracted-text {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.7;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .detail-stats {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 16px;
+            font-size: 0.8rem;
+        }
+        .stat { display: flex; flex-direction: column; gap: 2px; }
+        .stat-label { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-value { font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+        /* Empty state */
+        .empty {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            animation: slideIn 0.3s ease;
+            max-width: 360px;
+        }
+        .toast.success { background: rgba(74, 222, 128, 0.15); color: var(--green); border: 1px solid rgba(74, 222, 128, 0.25); }
+        .toast.error { background: rgba(248, 113, 113, 0.15); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.25); }
+        .toast.info { background: rgba(56, 189, 248, 0.15); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.25); }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(40px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .refresh-btn {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            font-family: 'DM Sans', sans-serif;
+            transition: all 0.2s;
+        }
+        .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="header">
+            <h1>⬡ OCR Document Processor</h1>
+            <p>Upload images or PDFs — Tesseract extracts text automatically</p>
+        </div>
+
+        <!-- Upload Zone -->
+        <div class="upload-zone" id="dropZone">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <h3>Drop files here or click to upload</h3>
+            <span>PNG, JPG, TIFF, PDF — up to 50 MB</span>
+            <input type="file" id="fileInput" accept="image/*,.pdf" multiple>
+        </div>
+
+        <div class="upload-progress" id="progress">
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="progress-text" id="progressText">Uploading...</div>
+        </div>
+
+        <!-- Document List -->
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="section-title">
+                Documents <span class="count" id="docCount">0</span>
+            </div>
+            <button class="refresh-btn" onclick="loadDocuments()">↻ Refresh</button>
+        </div>
+
+        <div class="doc-list" id="docList">
+            <div class="empty">No documents yet — upload something to get started.</div>
+        </div>
+
+        <!-- Detail Panel -->
+        <div class="detail-panel" id="detailPanel">
+            <div class="detail-header">
+                <h3 id="detailTitle">Document Details</h3>
+                <button class="close-btn" onclick="closeDetail()">✕</button>
+            </div>
+            <div class="detail-body">
+                <div class="detail-stats" id="detailStats"></div>
+                <div class="extracted-text" id="extractedText">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toasts"></div>
+
+    <script>
+        const API = window.location.port === '' ? '/api' : 'http://localhost:8000';
+
+        // ── Toast ──
+        function toast(msg, type = 'info') {
+            const c = document.getElementById('toasts');
+            const t = document.createElement('div');
+            t.className = `toast ${type}`;
+            t.textContent = msg;
+            c.appendChild(t);
+            setTimeout(() => t.remove(), 4000);
+        }
+
+        // ── Upload ──
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+        async function handleFiles(files) {
+            for (const file of files) {
+                await uploadFile(file);
+            }
+            // Wait a moment for Lambda to process, then refresh
+            toast('Processing with OCR... refreshing in 5s', 'info');
+            setTimeout(loadDocuments, 5000);
+        }
+
+        async function uploadFile(file) {
+            const progress = document.getElementById('progress');
+            const fill = document.getElementById('progressFill');
+            const text = document.getElementById('progressText');
+
+            progress.classList.add('active');
+            fill.style.width = '20%';
+            text.textContent = `Uploading ${file.name}...`;
+
+            try {
+                const form = new FormData();
+                form.append('file', file);
+
+                fill.style.width = '60%';
+                const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
+
+                if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+
+                const data = await res.json();
+                fill.style.width = '100%';
+                text.textContent = `✓ Uploaded — doc_id: ${data.doc_id}`;
+                toast(`Uploaded ${file.name}`, 'success');
+
+                setTimeout(() => { progress.classList.remove('active'); }, 2000);
+                loadDocuments();
+
+            } catch (err) {
+                fill.style.width = '100%';
+                fill.style.background = 'var(--red)';
+                text.textContent = `✗ ${err.message}`;
+                toast(err.message, 'error');
+                setTimeout(() => {
+                    progress.classList.remove('active');
+                    fill.style.background = '';
+                }, 3000);
+            }
+        }
+
+        // ── Load Documents ──
+        async function loadDocuments() {
+            try {
+                const res = await fetch(`${API}/documents`);
+                const data = await res.json();
+                const docs = data.documents || [];
+
+                document.getElementById('docCount').textContent = docs.length;
+                const list = document.getElementById('docList');
+
+                if (docs.length === 0) {
+                    list.innerHTML = '<div class="empty">No documents yet — upload something to get started.</div>';
+                    return;
+                }
+
+                list.innerHTML = docs.map(d => `
+                    <div class="doc-card" onclick="showDetail('${d.doc_id}')">
+                        <div class="doc-info">
+                            <h4>${d.original_filename}</h4>
+                            <div class="doc-meta">${d.doc_id.substring(0, 8)}… · ${formatBytes(d.file_size_bytes)} · ${timeAgo(d.created_at)}</div>
+                        </div>
+                        <span class="badge ${d.ocr_status}">${d.ocr_status}</span>
+                        <span class="word-count">${d.word_count ? d.word_count + ' words' : '—'}</span>
+                    </div>
+                `).join('');
+
+            } catch (err) {
+                toast('Failed to load documents: ' + err.message, 'error');
+            }
+        }
+
+        // ── Detail View ──
+        async function showDetail(docId) {
+            const panel = document.getElementById('detailPanel');
+            panel.classList.add('active');
+            document.getElementById('extractedText').textContent = 'Loading...';
+
+            try {
+                const res = await fetch(`${API}/documents/${docId}`);
+                const doc = await res.json();
+
+                document.getElementById('detailTitle').textContent = doc.original_filename;
+                document.getElementById('detailStats').innerHTML = `
+                    <div class="stat"><span class="stat-label">Status</span><span class="stat-value">${doc.ocr_status}</span></div>
+                    <div class="stat"><span class="stat-label">Pages</span><span class="stat-value">${doc.page_count || '—'}</span></div>
+                    <div class="stat"><span class="stat-label">Words</span><span class="stat-value">${doc.word_count || '—'}</span></div>
+                    <div class="stat"><span class="stat-label">Doc ID</span><span class="stat-value">${doc.doc_id.substring(0,12)}…</span></div>
+                `;
+                document.getElementById('extractedText').textContent =
+                    doc.extracted_text || (doc.ocr_status === 'pending' ? 'Waiting for OCR processing...' : 'No text extracted.');
+
+            } catch (err) {
+                document.getElementById('extractedText').textContent = 'Error: ' + err.message;
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('detailPanel').classList.remove('active');
+        }
+
+        // ── Helpers ──
+        function formatBytes(b) {
+            if (!b) return '—';
+            if (b < 1024) return b + ' B';
+            if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+            return (b / 1048576).toFixed(1) + ' MB';
+        }
+
+        function timeAgo(iso) {
+            if (!iso) return '';
+            const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+            if (s < 60) return 'just now';
+            if (s < 3600) return Math.floor(s / 60) + 'm ago';
+            if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+            return Math.floor(s / 86400) + 'd ago';
+        }
+
+        // Auto-load on start
+        loadDocuments();
+        // Poll every 10s
+        setInterval(loadDocuments, 10000);
+    </script>
+</body>
+</html>
