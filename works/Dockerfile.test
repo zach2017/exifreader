@@ -1,0 +1,32 @@
+FROM python:3.13-slim
+
+# Install Tesseract OCR + poppler
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        libtesseract-dev \
+        poppler-utils \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps
+COPY api-server/requirements.txt /app/requirements-app.txt
+RUN pip install --no-cache-dir -r requirements-app.txt
+
+RUN pip install --no-cache-dir \
+    pytest==8.3.5 \
+    pytest-cov==6.1.1 \
+    moto[s3]==5.1.2 \
+    httpx==0.28.1
+
+# Copy source code
+COPY api-server/ /app/api-server/
+COPY lambda/ /app/lambda/
+COPY tests/ /app/tests/
+COPY pytest.ini /app/
+
+ENV PYTHONPATH=/app/api-server:/app/lambda
+
+CMD ["pytest", "-v", "--tb=short"]

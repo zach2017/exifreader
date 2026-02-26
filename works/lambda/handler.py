@@ -30,6 +30,7 @@ def handler(event, context):
         parts = s3_key.split("/")
         if len(parts) < 3 or parts[0] != "uploads":
             logger.warning(f"Skipping unexpected key pattern: {s3_key}")
+            results.append({"s3_key": s3_key, "status": "skipped", "reason": f"Key pattern not matched: {s3_key}"})
             continue
 
         doc_id = parts[1]
@@ -52,7 +53,12 @@ def handler(event, context):
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else str(e)
             logger.error(f"OCR API HTTP error for {doc_id}: {e.code} – {error_body}")
-            results.append({"doc_id": doc_id, "status": "error", "error": error_body})
+            results.append({
+                "doc_id": doc_id,
+                "status": "error",
+                "http_code": e.code,
+                "error": error_body,
+            })
 
         except Exception as e:
             logger.error(f"OCR API call failed for {doc_id}: {e}")

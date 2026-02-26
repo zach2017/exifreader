@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtesseract-dev \
         poppler-utils \
         libgl1 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

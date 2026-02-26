@@ -1,0 +1,37 @@
+# docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+
+services:
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ocr_db
+      POSTGRES_USER: ocruser
+      POSTGRES_PASSWORD: ocrpass123
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocruser -d ocr_db"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ocr_db
+      POSTGRES_USER: ocruser
+      POSTGRES_PASSWORD: ocrpass123
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      S3_ENDPOINT: ""
+      S3_BUCKET: test-ocr-documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["pytest", "-v", "--tb=short", "-x"]
