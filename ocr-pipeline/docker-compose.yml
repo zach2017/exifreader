@@ -1,0 +1,122 @@
+# ─────────────────────────────────────────────────────────────────
+# OCR Pipeline — Event-Driven Architecture (LocalStack Community)
+#
+#   S3 upload → SQS notification → Lambda cold start →
+#   Tesseract OCR → result written to S3 → Gateway polls → Frontend
+#
+# Lambda deployment uses zip packages (free) NOT container images
+# (Pro). Tesseract is provided via LAMBDA_RUNTIME_IMAGE_MAPPING
+# which tells LocalStack to use our custom runtime image.
+# ─────────────────────────────────────────────────────────────────
+
+services:
+
+  # ─── LocalStack: S3 + SQS + Lambda runtime ─────────────────
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,lambda
+      - DEBUG=1
+      - PERSISTENCE=0
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LAMBDA_DOCKER_NETWORK=ocr-net
+      # Map python3.11 runtime to our custom image with Tesseract
+      - LAMBDA_RUNTIME_IMAGE_MAPPING={"python3.11":"ocr-lambda-runtime:latest"}
+      # Pass env vars into the Lambda container at invocation time
+      - LAMBDA_DOCKER_FLAGS=-e S3_ENDPOINT=http://localstack:4566 -e RESULT_BUCKET=ocr-results -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ocr-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ─── Build-only: builds the custom Lambda runtime image ─────
+  # This image provides Tesseract + PyMuPDF + awslambdaric.
+  # LocalStack uses it via LAMBDA_RUNTIME_IMAGE_MAPPING (free).
+  # The handler code is deployed separately as a zip package.
+  lambda-build:
+    build:
+      context: ./lambda
+      dockerfile: Dockerfile
+    image: ocr-lambda-runtime:latest
+    container_name: lambda-build
+    entrypoint: ["echo", "Lambda runtime image built successfully"]
+    networks:
+      - ocr-net
+
+  # ─── Init: AWS CLI v2 — deploys Lambda zip + wires events ──
+  init-aws:
+    build:
+      context: ./init-aws
+      dockerfile: Dockerfile
+    container_name: init-aws
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_URL=http://localstack:4566
+    volumes:
+      # Mount Lambda handler code so init script can zip and deploy it
+      - ./lambda:/opt/lambda-code:ro
+    networks:
+      - ocr-net
+    depends_on:
+      localstack:
+        condition: service_healthy
+      lambda-build:
+        condition: service_completed_successfully
+
+  # ─── API Gateway (bridges Frontend ↔ LocalStack) ───────────
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_URL=http://localstack:4566
+      - UPLOAD_BUCKET=ocr-uploads
+      - RESULT_BUCKET=ocr-results
+      - SQS_QUEUE=ocr-jobs
+    networks:
+      - ocr-net
+    depends_on:
+      localstack:
+        condition: service_healthy
+      init-aws:
+        condition: service_completed_successfully
+
+  # ─── Frontend (Nginx + static HTML) ────────────────────────
+  frontend:
+    image: nginx:alpine
+    container_name: frontend
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ocr-net
+    depends_on:
+      - gateway
+
+networks:
+  ocr-net:
+    name: ocr-net
+    driver: bridge
+
+volumes:
+  localstack_data:

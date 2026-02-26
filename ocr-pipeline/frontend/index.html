@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesseract OCR — Event-Driven Pipeline</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['DM Sans', 'sans-serif'],
+                    },
+                    colors: {
+                        ink: '#0a0a0a',
+                        paper: '#f5f0e8',
+                        warm: '#faf6f0',
+                        accent: '#d94f1e',
+                        green: '#2d8a4e',
+                        dim: '#8a8070',
+                        rule: '#d4cdc0',
+                        faint: '#e8e2d8',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #f5f0e8; }
+        body::before {
+            content: ''; position: fixed; inset: 0; pointer-events: none; opacity: 0.025; z-index: 9999;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
+        .drop-zone { transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+        .drop-zone.drag-over { border-color: #d94f1e; background-color: rgba(217,79,30,0.03); transform: scale(1.003); }
+
+        /* Pipeline step styling */
+        .pipe-node { transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+        .pipe-node.waiting .pipe-icon { background: #e8e2d8; color: #8a8070; }
+        .pipe-node.active .pipe-icon { background: #d94f1e; color: white; box-shadow: 0 0 0 4px rgba(217,79,30,0.15); }
+        .pipe-node.done .pipe-icon { background: #2d8a4e; color: white; }
+        .pipe-node.error .pipe-icon { background: #dc2626; color: white; }
+        .pipe-connector { height: 2px; background: #e8e2d8; transition: background 0.5s ease; flex: 1; }
+        .pipe-connector.done { background: #2d8a4e; }
+
+        @keyframes gentlePulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+        .pulse { animation: gentlePulse 1.5s ease-in-out infinite; }
+
+        @keyframes fadeUp { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
+        .fade-up { animation: fadeUp 0.4s ease-out forwards; }
+
+        @keyframes scanMove { 0% { left:-30% } 100% { left:100% } }
+        .scan-bar { animation: scanMove 1.8s ease-in-out infinite; }
+
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d4cdc0; border-radius: 3px; }
+    </style>
+</head>
+
+<body class="font-sans text-ink min-h-screen">
+
+    <!-- Header -->
+    <header class="border-b border-rule bg-warm/50">
+        <div class="max-w-4xl mx-auto px-6 py-5 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 bg-ink rounded flex items-center justify-center">
+                    <svg class="w-5 h-5 text-paper" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        <path stroke-linecap="round" d="M9 13h6M9 16h4"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold tracking-tight leading-none">OCR Scanner</h1>
+                    <p class="text-[11px] text-dim font-mono mt-0.5">event-driven · S3 → SQS → Lambda</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 text-[11px] font-mono text-dim">
+                <span class="w-1.5 h-1.5 rounded-full" id="statusDot" style="background:#d4cdc0"></span>
+                <span id="statusText">checking…</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-6 py-8 space-y-8">
+
+        <!-- ═══ Architecture callout ═══ -->
+        <div class="bg-white border border-rule rounded-lg px-5 py-3 flex items-center gap-3 text-[11px] font-mono text-dim">
+            <svg class="w-4 h-4 flex-shrink-0 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/>
+            </svg>
+            <span>Lambda is <strong class="text-ink">not running</strong>. It cold-starts only when a file hits S3.</span>
+        </div>
+
+        <!-- ═══ Upload Zone ═══ -->
+        <section>
+            <div
+                id="dropZone"
+                class="drop-zone border-2 border-dashed border-rule rounded-lg p-10 text-center cursor-pointer hover:border-dim relative overflow-hidden bg-white/50"
+                onclick="document.getElementById('fileInput').click()"
+            >
+                <input type="file" id="fileInput" class="hidden" accept="image/*,.pdf" />
+
+                <div id="dropContent">
+                    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-paper border border-rule flex items-center justify-center">
+                        <svg class="w-5 h-5 text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+                        </svg>
+                    </div>
+                    <p class="text-sm font-medium">Drop a file or click to browse</p>
+                    <p class="text-[11px] text-dim font-mono mt-1">PNG · JPG · TIFF · BMP · PDF — up to 20 MB</p>
+                </div>
+
+                <div id="filePreview" class="hidden">
+                    <div class="flex items-center justify-center gap-4">
+                        <div id="thumbWrap" class="w-16 h-16 rounded border border-rule bg-paper flex items-center justify-center overflow-hidden">
+                            <img id="thumbImg" class="hidden max-w-full max-h-full object-contain" alt="">
+                            <svg id="thumbPdf" class="hidden w-7 h-7 text-accent" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 2l5 5h-5V4zM9 13h2v5H9v-5zm4 0h2v5h-2v-5z"/></svg>
+                        </div>
+                        <div class="text-left">
+                            <p id="fileName" class="text-sm font-medium truncate max-w-[200px]"></p>
+                            <p id="fileSize" class="text-[11px] text-dim font-mono mt-0.5"></p>
+                            <button id="clearBtn" class="text-[11px] text-accent hover:underline mt-0.5" onclick="event.stopPropagation(); clearFile()">remove</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 flex items-center gap-4">
+                <button
+                    id="scanBtn" disabled
+                    class="px-5 py-2.5 bg-ink text-paper font-semibold text-sm rounded-md disabled:opacity-25 disabled:cursor-not-allowed hover:bg-accent transition-colors"
+                    onclick="startScan()"
+                >
+                    Extract Text
+                </button>
+                <span id="scanHint" class="text-[11px] text-dim hidden font-mono">
+                    upload → S3 event → SQS → Lambda cold start → Tesseract OCR
+                </span>
+            </div>
+        </section>
+
+        <!-- ═══ Pipeline Visualizer ═══ -->
+        <section id="pipelineSection" class="hidden">
+            <div class="border border-rule rounded-lg bg-white p-6 relative overflow-hidden">
+
+                <!-- Animated scan bar -->
+                <div id="scanBar" class="scan-bar absolute top-0 h-[2px] w-[30%] bg-gradient-to-r from-transparent via-accent to-transparent"></div>
+
+                <div class="flex items-center gap-2 mb-5">
+                    <span class="text-[10px] font-mono text-dim uppercase tracking-[0.15em]">Pipeline</span>
+                    <span id="pipelineStatus" class="text-[10px] font-mono text-accent pulse">processing…</span>
+                </div>
+
+                <!-- Step nodes with connectors -->
+                <div class="flex items-center gap-0" id="stepsRow">
+                    <!-- S3 Upload -->
+                    <div class="pipe-node waiting flex flex-col items-center" id="node-s3" style="min-width:70px">
+                        <div class="pipe-icon w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold transition-all">S3</div>
+                        <span class="text-[9px] font-mono text-dim mt-1.5 uppercase tracking-wider">Upload</span>
+                        <span class="text-[9px] font-mono text-dim" id="time-s3">—</span>
+                    </div>
+
+                    <div class="pipe-connector" id="conn-1"></div>
+
+                    <!-- SQS Event -->
+                    <div class="pipe-node waiting flex flex-col items-center" id="node-sqs" style="min-width:70px">
+                        <div class="pipe-icon w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold transition-all">SQS</div>
+                        <span class="text-[9px] font-mono text-dim mt-1.5 uppercase tracking-wider">Event</span>
+                        <span class="text-[9px] font-mono text-dim" id="time-sqs">—</span>
+                    </div>
+
+                    <div class="pipe-connector" id="conn-2"></div>
+
+                    <!-- Lambda Cold Start -->
+                    <div class="pipe-node waiting flex flex-col items-center" id="node-lambda" style="min-width:70px">
+                        <div class="pipe-icon w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold transition-all">λ</div>
+                        <span class="text-[9px] font-mono text-dim mt-1.5 uppercase tracking-wider">Lambda</span>
+                        <span class="text-[9px] font-mono text-dim" id="time-lambda">—</span>
+                    </div>
+
+                    <div class="pipe-connector" id="conn-3"></div>
+
+                    <!-- OCR -->
+                    <div class="pipe-node waiting flex flex-col items-center" id="node-ocr" style="min-width:70px">
+                        <div class="pipe-icon w-9 h-9 rounded-full flex items-center justify-center transition-all">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" d="M9 12h6M9 16h4M7 4h10l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
+                        </div>
+                        <span class="text-[9px] font-mono text-dim mt-1.5 uppercase tracking-wider">OCR</span>
+                        <span class="text-[9px] font-mono text-dim" id="time-ocr">—</span>
+                    </div>
+
+                    <div class="pipe-connector" id="conn-4"></div>
+
+                    <!-- Result -->
+                    <div class="pipe-node waiting flex flex-col items-center" id="node-done" style="min-width:70px">
+                        <div class="pipe-icon w-9 h-9 rounded-full flex items-center justify-center transition-all">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                        </div>
+                        <span class="text-[9px] font-mono text-dim mt-1.5 uppercase tracking-wider">Done</span>
+                        <span class="text-[9px] font-mono text-dim" id="time-done">—</span>
+                    </div>
+                </div>
+
+                <!-- Description of what's happening -->
+                <p id="pipelineDesc" class="text-[11px] text-dim font-mono mt-4 text-center"></p>
+            </div>
+        </section>
+
+        <!-- ═══ Results ═══ -->
+        <section id="resultsSection" class="hidden fade-up">
+            <div class="border border-rule rounded-lg bg-white overflow-hidden">
+
+                <div class="border-b border-rule px-5 py-3 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-bold">Extracted Text</h2>
+                        <p class="text-[11px] text-dim font-mono mt-0.5">
+                            <span id="resFile">—</span> ·
+                            <span id="resWords">0</span> words ·
+                            <span id="resChars">0</span> chars
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="copyText()" id="copyBtn" class="px-2.5 py-1 text-[11px] font-mono border border-rule rounded hover:bg-paper transition-colors">copy</button>
+                        <button onclick="downloadText()" class="px-2.5 py-1 text-[11px] font-mono border border-rule rounded hover:bg-paper transition-colors">download</button>
+                        <button onclick="resetUI()" class="px-2.5 py-1 text-[11px] font-mono bg-ink text-paper rounded hover:bg-accent transition-colors">new scan</button>
+                    </div>
+                </div>
+
+                <div class="p-5">
+                    <pre id="extractedText" class="font-mono text-[13px] leading-relaxed whitespace-pre-wrap max-h-[450px] overflow-y-auto custom-scroll text-ink/90"></pre>
+                </div>
+
+                <!-- PDF pages -->
+                <div id="pageDetails" class="hidden border-t border-rule">
+                    <button class="w-full px-5 py-2.5 flex items-center gap-2 hover:bg-paper/50 transition-colors text-left" onclick="togglePages()">
+                        <svg id="pageChev" class="w-3.5 h-3.5 text-dim transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                        <span class="text-[10px] font-mono text-dim uppercase tracking-wider">Per-page breakdown</span>
+                        <span id="pageCount" class="text-[10px] font-mono text-dim ml-auto"></span>
+                    </button>
+                    <div id="pageList" class="hidden px-5 pb-4 space-y-2"></div>
+                </div>
+
+                <!-- Timing grid -->
+                <div class="border-t border-rule px-5 py-3">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="timingGrid"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ Error ═══ -->
+        <section id="errorSection" class="hidden fade-up">
+            <div class="border border-red-200 rounded-lg bg-red-50 p-5">
+                <div class="flex items-start gap-3">
+                    <svg class="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+                    <div>
+                        <p class="text-sm font-semibold text-red-800">Pipeline error</p>
+                        <p id="errorMessage" class="text-[11px] text-red-600 font-mono mt-1 whitespace-pre-wrap"></p>
+                        <button onclick="resetUI()" class="mt-2 px-3 py-1 text-[11px] font-mono border border-red-200 rounded hover:bg-white transition-colors text-red-700">try again</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ Recent Files ═══ -->
+        <section class="mt-6 mb-16">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-[10px] font-mono text-dim uppercase tracking-[0.15em]">Recent uploads in S3</h3>
+                <button onclick="loadFiles()" class="text-[10px] font-mono text-dim hover:text-ink transition-colors">refresh</button>
+            </div>
+            <div id="fileList" class="font-mono text-[11px] text-dim">
+                <p>No files yet.</p>
+            </div>
+        </section>
+    </main>
+
+    <script>
+    let selectedFile = null;
+    let resultData = null;
+    const $ = id => document.getElementById(id);
+
+    // ── Drag & Drop + File Input ───────────────────────────────
+    const dz = $('dropZone'), fi = $('fileInput');
+    ['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('drag-over'); }));
+    ['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('drag-over'); }));
+    dz.addEventListener('drop', e => { if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+    fi.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+    function handleFile(file) {
+        if (file.size > 20*1024*1024) { showError('File exceeds 20 MB.'); return; }
+        const ext = file.name.split('.').pop().toLowerCase();
+        const ok = ['png','jpg','jpeg','tiff','tif','bmp','gif','webp','pdf'];
+        if (!ok.includes(ext)) { showError('Unsupported file type.'); return; }
+
+        selectedFile = file;
+        $('dropContent').classList.add('hidden');
+        $('filePreview').classList.remove('hidden');
+        $('fileName').textContent = file.name;
+        $('fileSize').textContent = fmtBytes(file.size);
+        $('scanBtn').disabled = false;
+        $('scanHint').classList.remove('hidden');
+
+        if (file.type.startsWith('image/')) {
+            const r = new FileReader();
+            r.onload = e => { $('thumbImg').src = e.target.result; $('thumbImg').classList.remove('hidden'); $('thumbPdf').classList.add('hidden'); };
+            r.readAsDataURL(file);
+        } else {
+            $('thumbImg').classList.add('hidden');
+            $('thumbPdf').classList.remove('hidden');
+        }
+    }
+
+    function clearFile() {
+        selectedFile = null; fi.value = '';
+        $('dropContent').classList.remove('hidden');
+        $('filePreview').classList.add('hidden');
+        $('scanBtn').disabled = true;
+        $('scanHint').classList.add('hidden');
+    }
+
+    // ── Pipeline ───────────────────────────────────────────────
+    const steps = ['s3','sqs','lambda','ocr','done'];
+    const conns = ['conn-1','conn-2','conn-3','conn-4'];
+    const descs = {
+        s3:     'Uploading file to S3 bucket…',
+        sqs:    'S3 event notification → SQS queue…',
+        lambda: 'SQS triggers Lambda cold start…',
+        ocr:    'Tesseract extracting text…',
+        done:   'Result written to S3. Complete!',
+    };
+
+    function resetPipeline() {
+        steps.forEach(s => { $(`node-${s}`).className = 'pipe-node waiting flex flex-col items-center'; $(`time-${s}`).textContent = '—'; });
+        conns.forEach(c => $(c).className = 'pipe-connector');
+        $('pipelineStatus').textContent = 'processing…';
+        $('pipelineStatus').className = 'text-[10px] font-mono text-accent pulse';
+        $('pipelineDesc').textContent = '';
+        $('scanBar').style.display = 'block';
+    }
+
+    function activateStep(name) {
+        $(`node-${name}`).className = 'pipe-node active flex flex-col items-center';
+        $('pipelineDesc').textContent = descs[name] || '';
+    }
+
+    function completeStep(name, timeLabel) {
+        $(`node-${name}`).className = 'pipe-node done flex flex-col items-center';
+        if (timeLabel) $(`time-${name}`).textContent = timeLabel;
+        const idx = steps.indexOf(name);
+        if (idx > 0) $(conns[idx-1]).className = 'pipe-connector done';
+    }
+
+    function failStep(name) {
+        $(`node-${name}`).className = 'pipe-node error flex flex-col items-center';
+    }
+
+    async function startScan() {
+        if (!selectedFile) return;
+
+        $('pipelineSection').classList.remove('hidden');
+        $('pipelineSection').classList.add('fade-up');
+        $('resultsSection').classList.add('hidden');
+        $('errorSection').classList.add('hidden');
+        $('scanBtn').disabled = true;
+        resetPipeline();
+
+        activateStep('s3');
+
+        const fd = new FormData();
+        fd.append('file', selectedFile);
+
+        try {
+            const t0 = performance.now();
+            const resp = await fetch('/api/scan', { method: 'POST', body: fd });
+            const totalClientMs = Math.round(performance.now() - t0);
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${resp.status}`);
+            }
+
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
+            resultData = data;
+
+            const p = data.pipeline || {};
+
+            // Animate steps
+            completeStep('s3', p.s3_upload_ms ? `${p.s3_upload_ms}ms` : '✓');
+            activateStep('sqs');
+            await delay(250);
+
+            completeStep('sqs', 'event');
+            activateStep('lambda');
+            await delay(300);
+
+            const lambdaMs = p.lambda_cold_start_and_process_ms;
+            completeStep('lambda', lambdaMs ? `${Math.round(lambdaMs)}ms` : '✓');
+            activateStep('ocr');
+            await delay(200);
+
+            const ocrMs = p.lambda_ocr_ms || data.total_ocr_ms;
+            completeStep('ocr', ocrMs ? `${Math.round(ocrMs)}ms` : '✓');
+            await delay(200);
+
+            completeStep('done', p.total_ms ? `${Math.round(p.total_ms)}ms` : `${totalClientMs}ms`);
+
+            $('pipelineStatus').textContent = 'complete';
+            $('pipelineStatus').className = 'text-[10px] font-mono text-green';
+            $('scanBar').style.display = 'none';
+            $('pipelineDesc').textContent = `Pipeline finished in ${p.total_ms || totalClientMs}ms`;
+
+            showResults(data);
+            loadFiles();
+
+        } catch (err) {
+            const current = steps.find(s => $(`node-${s}`).classList.contains('active'));
+            if (current) failStep(current);
+            $('pipelineStatus').textContent = 'failed';
+            $('pipelineStatus').className = 'text-[10px] font-mono text-red-500';
+            $('scanBar').style.display = 'none';
+            showError(err.message);
+        }
+
+        $('scanBtn').disabled = false;
+    }
+
+    // ── Results ────────────────────────────────────────────────
+    function showResults(data) {
+        $('resultsSection').classList.remove('hidden');
+        $('resultsSection').classList.add('fade-up');
+
+        $('extractedText').textContent = data.text || '(no text extracted)';
+        $('resFile').textContent = data.filename || '—';
+
+        const wc = data.word_count || data.total_word_count || (data.text ? data.text.split(/\s+/).filter(Boolean).length : 0);
+        const cc = data.char_count || data.total_char_count || (data.text ? data.text.length : 0);
+        $('resWords').textContent = wc.toLocaleString();
+        $('resChars').textContent = cc.toLocaleString();
+
+        // Pages (PDFs)
+        if (data.pages && data.pages.length > 0) {
+            $('pageDetails').classList.remove('hidden');
+            $('pageCount').textContent = `${data.pages.length} page${data.pages.length > 1 ? 's' : ''}`;
+            const pl = $('pageList');
+            pl.innerHTML = data.pages.map(pg => `
+                <div class="border border-faint rounded p-2.5">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-mono text-[11px] font-semibold">Page ${pg.page}</span>
+                        <span class="font-mono text-[9px] text-dim">${pg.word_count} words · ${pg.ocr_ms || 0}ms</span>
+                    </div>
+                    <p class="font-mono text-[10px] text-dim leading-relaxed whitespace-pre-wrap">${esc(pg.text ? pg.text.slice(0, 250) : '(empty)')}</p>
+                </div>
+            `).join('');
+        } else {
+            $('pageDetails').classList.add('hidden');
+        }
+
+        // Timing grid
+        const g = $('timingGrid');
+        const p = data.pipeline || {};
+        g.innerHTML = '';
+        const stats = [
+            ['S3 Upload', p.s3_upload_ms],
+            ['Lambda + OCR', p.lambda_cold_start_and_process_ms],
+            ['Tesseract', p.lambda_ocr_ms || data.total_ocr_ms || data.processing_time_ms],
+            ['Total', p.total_ms],
+        ].filter(([,v]) => v != null);
+
+        stats.forEach(([label, ms]) => {
+            const d = document.createElement('div');
+            d.innerHTML = `
+                <p class="text-[9px] font-mono text-dim uppercase tracking-wider">${label}</p>
+                <p class="text-base font-mono font-bold mt-0.5">${Math.round(ms)}<span class="text-[10px] text-dim font-normal ml-0.5">ms</span></p>
+            `;
+            g.appendChild(d);
+        });
+
+        $('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function togglePages() {
+        const l = $('pageList'), c = $('pageChev');
+        l.classList.toggle('hidden');
+        c.style.transform = l.classList.contains('hidden') ? '' : 'rotate(90deg)';
+    }
+
+    // ── Actions ────────────────────────────────────────────────
+    function copyText() {
+        navigator.clipboard.writeText($('extractedText').textContent).then(() => {
+            const b = $('copyBtn'); b.textContent = 'copied!'; setTimeout(() => b.textContent = 'copy', 1200);
+        });
+    }
+    function downloadText() {
+        const name = (resultData?.filename || 'scan').replace(/\.[^.]+$/, '') + '_ocr.txt';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([$('extractedText').textContent], {type:'text/plain'}));
+        a.download = name; a.click(); URL.revokeObjectURL(a.href);
+    }
+    function resetUI() {
+        clearFile();
+        ['pipelineSection','resultsSection','errorSection'].forEach(s => $(s).classList.add('hidden'));
+        resultData = null;
+    }
+    function showError(msg) { $('errorSection').classList.remove('hidden'); $('errorMessage').textContent = msg; }
+
+    // ── Files ──────────────────────────────────────────────────
+    async function loadFiles() {
+        try {
+            const r = await fetch('/api/files');
+            if (!r.ok) return;
+            const d = await r.json();
+            const el = $('fileList');
+            if (!d.files?.length) { el.innerHTML = '<p>No files yet.</p>'; return; }
+            el.innerHTML = d.files.slice(-8).reverse().map(f => {
+                const name = f.key.split('/').pop();
+                return `<div class="flex justify-between py-1 border-b border-faint"><span class="truncate max-w-[200px]">${esc(name)}</span><span class="text-dim">${fmtBytes(f.size)} · ${new Date(f.last_modified).toLocaleTimeString()}</span></div>`;
+            }).join('');
+        } catch {}
+    }
+
+    // ── Health ─────────────────────────────────────────────────
+    async function checkHealth() {
+        try {
+            const r = await fetch('/api/health');
+            const d = await r.json();
+            $('statusDot').style.background = d.status === 'ok' ? '#2d8a4e' : '#eab308';
+            $('statusText').textContent = d.status === 'ok' ? 'all systems go' : 'degraded';
+        } catch {
+            $('statusDot').style.background = '#dc2626';
+            $('statusText').textContent = 'offline';
+        }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────
+    function fmtBytes(b) { return b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    checkHealth(); loadFiles(); setInterval(checkHealth, 15000);
+    </script>
+</body>
+</html>
