@@ -1,0 +1,20 @@
+# Builds the Go binary and creates a deployment zip
+FROM golang:1.22-bookworm
+
+WORKDIR /build
+COPY go.mod ./
+COPY *.go ./
+RUN go mod tidy && go mod download
+
+# Build for Amazon Linux (Lambda provided.al2023 runtime)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -tags lambda.norpc -o bootstrap main.go
+
+# Install zip and create deployment package
+RUN apt-get update && apt-get install -y zip && \
+    chmod +x bootstrap && \
+    zip function.zip bootstrap
+
+# Copy the zip to /out (mounted volume)
+CMD cp /build/function.zip /out/function.zip && \
+    echo "✓ Built function.zip ($(du -h /out/function.zip | cut -f1))"

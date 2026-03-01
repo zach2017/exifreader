@@ -6,11 +6,7 @@ export default defineConfig({
   forbidOnly: true,
   retries: 1,
   workers: 1,
-  reporter: [
-    ['list'],
-    ['html', { outputFolder: './test-results/html-report', open: 'never' }],
-    ['json', { outputFile: './test-results/results.json' }],
-  ],
+  reporter: [['list'], ['html', { outputFolder: './test-results/html-report', open: 'never' }]],
   timeout: 120_000,
   expect: { timeout: 30_000 },
   use: {
@@ -18,10 +14,5 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-  ],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

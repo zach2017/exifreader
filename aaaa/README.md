@@ -1,100 +1,49 @@
-# OCR Image Pipeline — LocalStack + Go Lambda + Tesseract
-
-A fully containerized OCR pipeline using LocalStack for AWS service emulation, a Go Lambda function with Tesseract OCR, and Playwright for E2E testing.
+# OCR Pipeline — LocalStack + Go Lambda + Tesseract
 
 ## Architecture
 
 ```
-┌──────────┐     ┌─────────────┐     ┌─────────────────────┐     ┌──────────┐
-│ Web Form │────▶│ S3 (uploads)│────▶│ Lambda (Go+Tesseract)│────▶│ S3 (output)│
-│ :8080    │     │             │     │                     │     │ .txt files │
-└──────────┘     └─────────────┘     └──────────┬──────────┘     └────────────┘
-                                                │
-                                                ▼
-                                          ┌──────────┐
-                                          │   SQS    │
-                                          │ messages │
-                                          └──────────┘
+Browser ──► S3 (ocr-uploads) ──► Lambda (Go+Tesseract) ──► S3 (ocr-output)
+  ▲                                       │                      │
+  │                                       ▼                      │
+  │                                   SQS (ocr-results)          │
+  │                                                              │
+  └──────── polls .txt file ◄────────────────────────────────────┘
+  └──────── polls SQS messages
 ```
-
-**Flow:**
-1. User uploads an image via the web form (or directly to S3)
-2. S3 event notification triggers the Lambda function
-3. Lambda downloads the image, runs Tesseract OCR
-4. **If text is found:** uploads `{name}.txt` to output bucket + sends SQS message
-5. **If no text:** does nothing (no file, no message)
-
-## Services
-
-| Service         | Port  | Description                           |
-|-----------------|-------|---------------------------------------|
-| `localstack`    | 4566  | S3, SQS, Lambda emulation            |
-| `web`           | 8080  | HTML upload form (Nginx)              |
-| `lambda-builder`| —     | Builds the Go+Tesseract Docker image  |
-| `setup`         | —     | Creates AWS resources in LocalStack   |
-| `tests`         | —     | Playwright E2E test suite             |
 
 ## Quick Start
 
 ```bash
-# Start all services
-docker compose up --build -d
+# 1) Build Lambda binary
+make build
 
-# Wait for setup to complete
-docker compose logs -f setup
+# 2) Start services (LocalStack auto-runs setup script)
+make up
 
-# Open the web UI
+# 3) Open browser
 open http://localhost:8080
 
-# Run tests
-docker compose run --rm tests
+# 4) Run tests
+make test
 ```
 
-## Running Tests
+## How It Works
 
-### Go Unit Tests (Lambda)
+1. **Build step** compiles Go binary → `lambda/dist/function.zip`
+2. **LocalStack starts**, auto-runs `scripts/setup-aws.sh` via init hooks
+3. Setup creates: S3 buckets, SQS queue, Lambda function (with real binary), S3→Lambda trigger
+4. **Upload an image** via the web form or directly to `s3://ocr-uploads/`
+5. Lambda downloads image, runs Tesseract OCR
+6. **If text found**: uploads `.txt` to `ocr-output`, sends SQS message
+7. **If no text**: nothing happens (no file, no message)
+8. **Web UI** polls S3 for the `.txt` file and SQS for the notification message
 
-```bash
-cd lambda
-go test -v ./...
-```
+## Key Fixes vs Common Pitfalls
 
-### Playwright E2E Tests
-
-```bash
-docker compose run --rm tests
-```
-
-Tests verify:
-- Web form loads with correct UI elements
-- File selection/removal behavior
-- Image upload triggers OCR pipeline
-- Text images produce `.txt` output + SQS message
-- Blank images produce no output and no message
-- Non-image files are ignored
-- Multiple image formats (PNG, JPEG) are supported
-
-## Project Structure
-
-```
-├── docker-compose.yml          # All services
-├── lambda/
-│   ├── Dockerfile              # Go build + Tesseract runtime
-│   ├── main.go                 # Lambda handler (S3 → OCR → S3 + SQS)
-│   ├── main_test.go            # Unit tests with mocked AWS clients
-│   └── go.mod
-├── web/
-│   ├── Dockerfile              # Nginx
-│   ├── index.html              # Upload form
-│   └── nginx.conf
-├── scripts/
-│   └── setup-aws.sh            # Creates buckets, queue, lambda, triggers
-├── tests/
-│   ├── Dockerfile              # Playwright + AWS CLI + ImageMagick
-│   ├── playwright.config.ts
-│   ├── specs/
-│   │   └── ocr-pipeline.spec.ts
-│   └── helpers/
-│       └── aws-helpers.ts      # S3/SQS utilities for tests
-└── README.md
-```
+- Lambda uses `provided.al2023` runtime with actual Go binary (not a Docker image)
+- `AWS_ENDPOINT_URL=http://host.docker.internal:4566` for Lambda→LocalStack communication
+- Setup runs inside LocalStack using `awslocal` (no external AWS CLI needed)
+- S3 notifications use JSON format via `put-bucket-notification-configuration`
+- Both S3 buckets have CORS configured for browser access
+- Tests use pure HTTP fetch (no AWS CLI dependency)

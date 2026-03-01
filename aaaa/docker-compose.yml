@@ -2,25 +2,27 @@ version: "3.8"
 
 services:
   # ─── LocalStack (S3 + SQS + Lambda) ───
+  # Scripts in ./scripts/ auto-execute via /etc/localstack/init/ready.d
   localstack:
-    image: localstack/localstack:3.7
+    image: localstack/localstack:latest
     container_name: localstack
     ports:
-      - "4566:4566"       # LocalStack Gateway
-      - "4510-4559:4510-4559"  # external service ports
+      - "4566:4566"
+      - "4510-4559:4510-4559"
     environment:
       - SERVICES=s3,sqs,lambda
       - DEBUG=1
       - LAMBDA_EXECUTOR=docker
       - LAMBDA_DOCKER_NETWORK=ocr-network
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT=120
+      - LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT=300
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       - "./scripts:/etc/localstack/init/ready.d"
+      - "./lambda/dist:/opt/lambda-dist:ro"
       - "localstack-data:/var/lib/localstack"
     networks:
       - ocr-network
@@ -28,16 +30,17 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 15
+      start_period: 20s
 
-  # ─── Lambda OCR Docker Image (pre-built) ───
+  # ─── Build Lambda binary (Go + creates deployment zip) ───
   lambda-builder:
     build:
       context: ./lambda
-      dockerfile: Dockerfile
-    image: ocr-lambda:latest
+      dockerfile: Dockerfile.build
     container_name: lambda-builder
-    entrypoint: ["echo", "Lambda image built successfully"]
+    volumes:
+      - "./lambda/dist:/out"
     networks:
       - ocr-network
 
@@ -55,26 +58,6 @@ services:
     networks:
       - ocr-network
 
-  # ─── Infrastructure Setup (creates buckets, queues, lambda, triggers) ───
-  setup:
-    image: alpine:3.20
-    container_name: ocr-setup
-    depends_on:
-      localstack:
-        condition: service_healthy
-      lambda-builder:
-        condition: service_completed_successfully
-    environment:
-      - AWS_DEFAULT_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_ENDPOINT_URL=http://localstack:4566
-    volumes:
-      - "./scripts:/scripts:ro"
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl > /dev/null 2>&1 && /bin/sh /scripts/setup-aws.sh"]
-    networks:
-      - ocr-network
-
   # ─── Playwright E2E Tests ───
   tests:
     build:
@@ -82,8 +65,8 @@ services:
       dockerfile: Dockerfile
     container_name: ocr-tests
     depends_on:
-      setup:
-        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
       web:
         condition: service_started
     environment:
@@ -97,6 +80,8 @@ services:
       - "./test-images:/app/test-images"
     networks:
       - ocr-network
+    profiles:
+      - test
 
 volumes:
   localstack-data:

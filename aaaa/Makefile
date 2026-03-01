@@ -1,46 +1,34 @@
-.PHONY: up down build test test-go test-e2e logs clean setup
+.PHONY: build up down test test-go test-e2e logs clean
 
-# Start all services
-up: build
-	docker compose up -d
-	@echo "Waiting for setup to complete..."
-	docker compose logs -f setup
-	@echo ""
-	@echo "✅ Services running! Open http://localhost:8080"
-
-# Build all images
+# 1) Build the Lambda binary
 build:
-	docker compose build
+	mkdir -p lambda/dist
+	docker compose build lambda-builder
+	docker compose run --rm lambda-builder
 
-# Stop all services
+# 2) Start services (build Lambda first, then LocalStack runs setup-aws.sh automatically)
+up: build
+	docker compose up -d localstack web
+	@echo "Waiting for LocalStack setup..."
+	@sleep 5
+	@docker compose logs localstack 2>&1 | grep -q "Setup complete" && echo "✅ Ready at http://localhost:8080" || echo "⏳ Still initializing — check: docker compose logs -f localstack"
+
 down:
 	docker compose down -v --remove-orphans
 
-# Run Go unit tests (inside Docker)
+# Go unit tests
 test-go:
-	docker run --rm -v $(PWD)/lambda:/app -w /app golang:1.22 sh -c "go mod tidy && go test -v ./..."
+	docker run --rm -v $$(pwd)/lambda:/app -w /app golang:1.22 sh -c "go mod tidy && go test -v -count=1 ./..."
 
-# Run Playwright E2E tests
+# Playwright E2E tests
 test-e2e:
-	docker compose run --rm tests
+	docker compose --profile test run --rm tests
 
-# Run all tests
 test: test-go test-e2e
 
-# View logs
 logs:
-	docker compose logs -f
+	docker compose logs -f localstack
 
-# View specific service logs
-logs-%:
-	docker compose logs -f $*
-
-# Clean everything
 clean:
 	docker compose down -v --remove-orphans --rmi local
-	rm -rf test-results test-images/*.png test-images/*.jpg localstack-data
-
-# Setup only (rebuild resources)
-setup:
-	docker compose up -d localstack
-	docker compose run --rm setup
+	rm -rf lambda/dist test-results test-images/*.png test-images/*.jpg

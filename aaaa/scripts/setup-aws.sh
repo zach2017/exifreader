@@ -1,176 +1,141 @@
-#!/bin/sh
+#!/bin/bash
 set -e
-
-ENDPOINT="http://localstack:4566"
-REGION="us-east-1"
 
 echo "═══════════════════════════════════════════"
 echo "  Setting up LocalStack AWS resources"
 echo "═══════════════════════════════════════════"
 
-# ── 1. Create S3 Buckets ──
+# Wait for the lambda zip to be available (built by lambda-builder)
+echo "▶ Waiting for Lambda deployment zip..."
+RETRIES=0
+while [ ! -f /opt/lambda-dist/function.zip ] && [ $RETRIES -lt 60 ]; do
+    sleep 2
+    RETRIES=$((RETRIES + 1))
+done
+
+if [ ! -f /opt/lambda-dist/function.zip ]; then
+    echo "  ✗ ERROR: /opt/lambda-dist/function.zip not found after 120s"
+    exit 1
+fi
+echo "  ✓ Lambda zip found"
+
+# ── 1. S3 Buckets ──
 echo "▶ Creating S3 buckets..."
 
-curl -s -X PUT "${ENDPOINT}/ocr-uploads" > /dev/null
-curl -s -X PUT "${ENDPOINT}/ocr-output" > /dev/null
+awslocal s3 mb s3://ocr-uploads 2>/dev/null || true
+awslocal s3 mb s3://ocr-output 2>/dev/null || true
 
-# Set CORS on upload bucket
-curl -s -X PUT "${ENDPOINT}/ocr-uploads?cors" \
-  -H "Content-Type: application/xml" \
-  -d '<?xml version="1.0" encoding="UTF-8"?>
-<CORSConfiguration>
-  <CORSRule>
-    <AllowedOrigin>*</AllowedOrigin>
-    <AllowedMethod>GET</AllowedMethod>
-    <AllowedMethod>PUT</AllowedMethod>
-    <AllowedMethod>POST</AllowedMethod>
-    <AllowedHeader>*</AllowedHeader>
-    <ExposeHeader>ETag</ExposeHeader>
-  </CORSRule>
-</CORSConfiguration>' > /dev/null
+awslocal s3api put-bucket-cors --bucket ocr-uploads --cors-configuration '{
+  "CORSRules": [{
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["GET", "PUT", "POST", "HEAD"],
+    "AllowedOrigins": ["*"],
+    "ExposeHeaders": ["ETag"]
+  }]
+}'
+
+awslocal s3api put-bucket-cors --bucket ocr-output --cors-configuration '{
+  "CORSRules": [{
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedOrigins": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"]
+  }]
+}'
 
 echo "  ✓ S3 buckets created (ocr-uploads, ocr-output)"
 
-# ── 2. Create SQS Queue ──
+# ── 2. SQS Queue ──
 echo "▶ Creating SQS queue..."
-
-curl -s -X POST "${ENDPOINT}" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "Action=CreateQueue&QueueName=ocr-results&Version=2012-11-05" > /dev/null
-
+awslocal sqs create-queue --queue-name ocr-results 2>/dev/null || true
 echo "  ✓ SQS queue created (ocr-results)"
 
-# ── 3. Create Lambda Function ──
-echo "▶ Creating Lambda function..."
+# ── 3. Lambda Function ──
+echo "▶ Creating Lambda function with real Go binary..."
 
-# Build a minimal valid zip in-line using base64 (contains a dummy "bootstrap" file)
-# This is a pre-built zip with a single file "bootstrap" containing "#!/bin/sh\nexit 0"
-# Generated via: python3 -c "import zipfile,io,base64; b=io.BytesIO(); z=zipfile.ZipFile(b,'w'); z.writestr('bootstrap','#!/bin/sh\nexit 0\n'); z.close(); print(base64.b64encode(b.getvalue()).decode())"
-DUMMY_ZIP_B64="UEsDBBQAAAAIAAAAAACKIYOwHAAAABoAAAAJABwAYm9vdHN0cmFwVVQJAAMAAAAAAAAAAAAAC0ktTtZRSMsvyklRBABQSwECHgMUAAAACAAAAAAAgIiBoRwAAAAaAAAACQAYAAAAAAAAAAAApIEAAAAAYm9vdHN0cmFwVVQFAAMAAAAAeAsAAFBLBQYAAAAAAQABAE8AAABfAAAAAAA="
-
-# Write the zip via base64 decode
-echo "${DUMMY_ZIP_B64}" | base64 -d > /tmp/function.zip
-
-# Create the Lambda function via LocalStack REST API
-PAYLOAD=$(cat <<EOF
-{
-  "FunctionName": "ocr-processor",
-  "Runtime": "provided.al2023",
-  "Role": "arn:aws:iam::000000000000:role/lambda-role",
-  "Handler": "bootstrap",
-  "Timeout": 120,
-  "MemorySize": 512,
-  "Environment": {
-    "Variables": {
-      "AWS_ENDPOINT_URL": "${ENDPOINT}",
-      "AWS_DEFAULT_REGION": "${REGION}",
-      "AWS_ACCESS_KEY_ID": "test",
-      "AWS_SECRET_ACCESS_KEY": "test"
-    }
-  },
-  "Code": {
-    "ZipFile": "${DUMMY_ZIP_B64}"
-  }
+awslocal lambda create-function \
+    --function-name ocr-processor \
+    --runtime provided.al2023 \
+    --handler bootstrap \
+    --role arn:aws:iam::000000000000:role/lambda-role \
+    --zip-file fileb:///opt/lambda-dist/function.zip \
+    --timeout 120 \
+    --memory-size 1024 \
+    --environment "Variables={AWS_ENDPOINT_URL=http://host.docker.internal:4566,AWS_DEFAULT_REGION=us-east-1,AWS_ACCESS_KEY_ID=test,AWS_SECRET_ACCESS_KEY=test}" \
+    2>/dev/null || {
+    echo "  Updating existing function..."
+    awslocal lambda update-function-code \
+        --function-name ocr-processor \
+        --zip-file fileb:///opt/lambda-dist/function.zip
+    awslocal lambda update-function-configuration \
+        --function-name ocr-processor \
+        --timeout 120 \
+        --memory-size 1024 \
+        --environment "Variables={AWS_ENDPOINT_URL=http://host.docker.internal:4566,AWS_DEFAULT_REGION=us-east-1,AWS_ACCESS_KEY_ID=test,AWS_SECRET_ACCESS_KEY=test}"
 }
-EOF
-)
 
-RESULT=$(curl -s -w "\n%{http_code}" -X POST \
-  "${ENDPOINT}/2015-03-31/functions" \
-  -H "Content-Type: application/json" \
-  -d "${PAYLOAD}")
+# Wait for function to be Active
+echo "  Waiting for function to become Active..."
+for i in $(seq 1 30); do
+    STATE=$(awslocal lambda get-function --function-name ocr-processor --query 'Configuration.State' --output text 2>/dev/null || echo "Pending")
+    if [ "$STATE" = "Active" ]; then
+        break
+    fi
+    sleep 2
+done
 
-HTTP_CODE=$(echo "$RESULT" | tail -1)
-BODY=$(echo "$RESULT" | sed '$d')
+echo "  ✓ Lambda function ready (ocr-processor)"
 
-if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
-  echo "  ✓ Lambda function created (ocr-processor)"
-elif echo "$BODY" | grep -q "ResourceConflictException"; then
-  echo "  ✓ Lambda function already exists (ocr-processor)"
-else
-  echo "  ⚠ Lambda creation response ($HTTP_CODE): $BODY"
-fi
-
-# ── 4. Configure S3 Event Notification → Lambda ──
+# ── 4. S3 → Lambda Trigger ──
 echo "▶ Configuring S3 → Lambda trigger..."
 
-LAMBDA_ARN="arn:aws:lambda:${REGION}:000000000000:function:ocr-processor"
+awslocal s3api put-bucket-notification-configuration \
+    --bucket ocr-uploads \
+    --notification-configuration '{
+        "LambdaFunctionConfigurations": [
+            {
+                "Id": "ocr-png",
+                "LambdaFunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:ocr-processor",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {"Key": {"FilterRules": [{"Name": "suffix", "Value": ".png"}]}}
+            },
+            {
+                "Id": "ocr-jpg",
+                "LambdaFunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:ocr-processor",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {"Key": {"FilterRules": [{"Name": "suffix", "Value": ".jpg"}]}}
+            },
+            {
+                "Id": "ocr-jpeg",
+                "LambdaFunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:ocr-processor",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {"Key": {"FilterRules": [{"Name": "suffix", "Value": ".jpeg"}]}}
+            },
+            {
+                "Id": "ocr-tiff",
+                "LambdaFunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:ocr-processor",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {"Key": {"FilterRules": [{"Name": "suffix", "Value": ".tiff"}]}}
+            },
+            {
+                "Id": "ocr-bmp",
+                "LambdaFunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:ocr-processor",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {"Key": {"FilterRules": [{"Name": "suffix", "Value": ".bmp"}]}}
+            }
+        ]
+    }'
 
-NOTIFICATION_XML="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<NotificationConfiguration>
-  <CloudFunctionConfiguration>
-    <CloudFunction>${LAMBDA_ARN}</CloudFunction>
-    <Event>s3:ObjectCreated:*</Event>
-    <Filter>
-      <S3Key>
-        <FilterRule><Name>suffix</Name><Value>.png</Value></FilterRule>
-      </S3Key>
-    </Filter>
-  </CloudFunctionConfiguration>
-  <CloudFunctionConfiguration>
-    <CloudFunction>${LAMBDA_ARN}</CloudFunction>
-    <Event>s3:ObjectCreated:*</Event>
-    <Filter>
-      <S3Key>
-        <FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule>
-      </S3Key>
-    </Filter>
-  </CloudFunctionConfiguration>
-  <CloudFunctionConfiguration>
-    <CloudFunction>${LAMBDA_ARN}</CloudFunction>
-    <Event>s3:ObjectCreated:*</Event>
-    <Filter>
-      <S3Key>
-        <FilterRule><Name>suffix</Name><Value>.jpeg</Value></FilterRule>
-      </S3Key>
-    </Filter>
-  </CloudFunctionConfiguration>
-  <CloudFunctionConfiguration>
-    <CloudFunction>${LAMBDA_ARN}</CloudFunction>
-    <Event>s3:ObjectCreated:*</Event>
-    <Filter>
-      <S3Key>
-        <FilterRule><Name>suffix</Name><Value>.tiff</Value></FilterRule>
-      </S3Key>
-    </Filter>
-  </CloudFunctionConfiguration>
-  <CloudFunctionConfiguration>
-    <CloudFunction>${LAMBDA_ARN}</CloudFunction>
-    <Event>s3:ObjectCreated:*</Event>
-    <Filter>
-      <S3Key>
-        <FilterRule><Name>suffix</Name><Value>.bmp</Value></FilterRule>
-      </S3Key>
-    </Filter>
-  </CloudFunctionConfiguration>
-</NotificationConfiguration>"
+echo "  ✓ S3 notification configured"
 
-curl -s -X PUT "${ENDPOINT}/ocr-uploads?notification" \
-  -H "Content-Type: application/xml" \
-  -d "${NOTIFICATION_XML}" > /dev/null
-
-echo "  ✓ S3 event notification configured"
-
-# ── 5. Verify setup ──
+# ── 5. Verify ──
 echo ""
 echo "═══════════════════════════════════════════"
 echo "  Verification"
 echo "═══════════════════════════════════════════"
-
-echo "▶ S3 Buckets:"
-curl -s "${ENDPOINT}" | grep -o '<Name>[^<]*</Name>' | sed 's/<[^>]*>//g' | while read -r name; do
-  echo "    - $name"
-done
-
-echo "▶ SQS Queues:"
-curl -s "${ENDPOINT}?Action=ListQueues&Version=2012-11-05" | grep -o '<QueueUrl>[^<]*</QueueUrl>' | sed 's/<[^>]*>//g' | while read -r url; do
-  echo "    - $url"
-done
-
-echo "▶ Lambda Functions:"
-curl -s "${ENDPOINT}/2015-03-31/functions" | grep -o '"FunctionName":"[^"]*"' | sed 's/"FunctionName":"//;s/"//' | while read -r fn; do
-  echo "    - $fn"
-done
-
+awslocal s3 ls
+awslocal sqs list-queues --output table
+awslocal lambda list-functions --query 'Functions[].{Name:FunctionName,Runtime:Runtime,State:State}' --output table
+awslocal s3api get-bucket-notification-configuration --bucket ocr-uploads
 echo ""
-echo "✅ All resources configured successfully!"
+echo "✅ Setup complete!"
