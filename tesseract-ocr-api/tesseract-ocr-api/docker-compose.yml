@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  ocr-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+
+  ocr-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    depends_on:
+      - ocr-server
+    environment:
+      - OCR_SERVER_URL=http://ocr-server:8080
+    volumes:
+      - ./images:/images:ro
+    # Pass IMAGE_PATH at runtime: docker compose run ocr-client /images/sample.png
