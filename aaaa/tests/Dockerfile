@@ -1,15 +1,16 @@
 FROM mcr.microsoft.com/playwright:v1.48.0-noble
 
-# Install AWS CLI and ImageMagick for test helpers
+# Install ImageMagick + fonts for generating test images (no AWS CLI needed)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        awscli \
         imagemagick \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Fix ImageMagick policy to allow text rendering
-RUN sed -i 's/<policy domain="path" rights="none" pattern="@\*"/<policy domain="path" rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
+# Fix ImageMagick policy to allow text rendering and writing
+RUN if [ -f /etc/ImageMagick-6/policy.xml ]; then \
+      sed -i 's/<policy domain="path" rights="none" pattern="@\*"/<policy domain="path" rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml; \
+    fi
 
 WORKDIR /app
 

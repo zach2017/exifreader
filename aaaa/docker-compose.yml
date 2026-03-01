@@ -57,7 +57,7 @@ services:
 
   # ─── Infrastructure Setup (creates buckets, queues, lambda, triggers) ───
   setup:
-    image: amazon/aws-cli:2.17.0
+    image: alpine:3.20
     container_name: ocr-setup
     depends_on:
       localstack:
@@ -70,9 +70,8 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_ENDPOINT_URL=http://localstack:4566
     volumes:
-      - "./scripts:/scripts"
-      - "./lambda:/lambda"
-    entrypoint: ["/bin/sh", "/scripts/setup-aws.sh"]
+      - "./scripts:/scripts:ro"
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl > /dev/null 2>&1 && /bin/sh /scripts/setup-aws.sh"]
     networks:
       - ocr-network
 

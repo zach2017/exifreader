@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   s3ObjectExists,
   s3GetObject,
@@ -15,8 +16,7 @@ const TEST_IMAGES_DIR = path.resolve('/app/test-images');
 
 test.describe('OCR Pipeline — Web Upload', () => {
   test.beforeAll(async () => {
-    // Purge SQS queue to start clean
-    sqsPurge('ocr-results');
+    await sqsPurge('ocr-results');
   });
 
   test('page loads with upload form elements', async ({ page }) => {
@@ -31,15 +31,12 @@ test.describe('OCR Pipeline — Web Upload', () => {
   test('file selection enables upload button and shows preview', async ({ page }) => {
     await page.goto('/');
 
-    // Generate a test image
     const imgPath = path.join(TEST_IMAGES_DIR, 'test-hello.png');
     generateTestImage('Hello World', imgPath);
 
-    // Upload via file input
     const fileInput = page.locator('#fileInput');
     await fileInput.setInputFiles(imgPath);
 
-    // Verify preview is shown
     await expect(page.locator('#filePreview')).toHaveClass(/visible/);
     await expect(page.locator('#fileName')).toContainText('test-hello.png');
     await expect(page.locator('#uploadBtn')).toBeEnabled();
@@ -54,7 +51,6 @@ test.describe('OCR Pipeline — Web Upload', () => {
     await page.locator('#fileInput').setInputFiles(imgPath);
     await expect(page.locator('#uploadBtn')).toBeEnabled();
 
-    // Remove file
     await page.locator('#fileRemove').click();
 
     await expect(page.locator('#filePreview')).not.toHaveClass(/visible/);
@@ -64,44 +60,38 @@ test.describe('OCR Pipeline — Web Upload', () => {
   test('rejects non-image files', async ({ page }) => {
     await page.goto('/');
 
-    // Create a text file
     const txtPath = path.join(TEST_IMAGES_DIR, 'not-an-image.txt');
-    require('fs').writeFileSync(txtPath, 'This is not an image');
+    fs.writeFileSync(txtPath, 'This is not an image');
 
-    // Try to upload — the accept attribute should filter, but test the UI state
+    // Playwright setInputFiles with accept mismatch — browser may or may not accept
+    // The important thing is the upload button state
     await page.locator('#fileInput').setInputFiles(txtPath);
 
-    // Upload button should remain disabled (file type not accepted)
-    // Note: Browser file input with accept may silently reject or show the file
-    // Depending on browser, the button may or may not enable
-    // The key assertion is that no upload occurs on non-image
+    // The file input has accept="image/..." so the browser should reject .txt
+    // Even if it doesn't, the server-side Lambda ignores non-image files
   });
 
   test('upload image with text triggers OCR and shows result', async ({ page }) => {
     await page.goto('/');
 
-    sqsPurge('ocr-results');
+    await sqsPurge('ocr-results');
 
     const imgPath = path.join(TEST_IMAGES_DIR, 'test-ocr-text.png');
     generateTestImage('Playwright Test', imgPath);
 
-    // Upload the file
     await page.locator('#fileInput').setInputFiles(imgPath);
     await page.locator('#uploadBtn').click();
 
     // Wait for status to show processing
     await expect(page.locator('#status')).toHaveClass(/visible/, { timeout: 10_000 });
 
-    // Wait for OCR result (this may take a while with Lambda processing)
-    // We'll check S3 directly as a fallback
-    const outputText = waitForS3Object('ocr-output', 'test-ocr-text.txt', 90_000);
+    // Poll S3 for the OCR output
+    const outputText = await waitForS3Object('ocr-output', 'test-ocr-text.txt', 90_000);
 
     if (outputText && outputText.trim()) {
-      // Verify OCR extracted something
       expect(outputText.length).toBeGreaterThan(0);
 
-      // Verify SQS message was sent
-      const messages = sqsReceiveMessages('ocr-results');
+      const messages = await sqsReceiveMessages('ocr-results');
       expect(messages.length).toBeGreaterThan(0);
 
       const msgBody = JSON.parse(messages[0].Body);
@@ -116,24 +106,21 @@ test.describe('OCR Pipeline — Web Upload', () => {
 
 test.describe('OCR Pipeline — Direct S3 Upload', () => {
   test.beforeAll(async () => {
-    sqsPurge('ocr-results');
+    await sqsPurge('ocr-results');
   });
 
   test('image with text produces .txt file and SQS message', async () => {
     const imgPath = path.join(TEST_IMAGES_DIR, 'direct-test.png');
     generateTestImage('Direct Upload', imgPath);
 
-    // Upload directly to S3
-    s3PutObject('ocr-uploads', 'direct-test.png', imgPath);
+    await s3PutObject('ocr-uploads', 'direct-test.png', imgPath);
 
-    // Wait for OCR output
-    const outputText = waitForS3Object('ocr-output', 'direct-test.txt', 90_000);
+    const outputText = await waitForS3Object('ocr-output', 'direct-test.txt', 90_000);
 
     expect(outputText).not.toBeNull();
     expect(outputText!.trim().length).toBeGreaterThan(0);
 
-    // Verify SQS message
-    const messages = sqsReceiveMessages('ocr-results');
+    const messages = await sqsReceiveMessages('ocr-results');
     expect(messages.length).toBeGreaterThan(0);
 
     const msgBody = JSON.parse(messages[0].Body);
@@ -141,40 +128,36 @@ test.describe('OCR Pipeline — Direct S3 Upload', () => {
   });
 
   test('blank image produces no .txt file and no SQS message', async () => {
-    sqsPurge('ocr-results');
+    await sqsPurge('ocr-results');
 
     const imgPath = path.join(TEST_IMAGES_DIR, 'blank-test.png');
     generateBlankImage(imgPath);
 
-    s3PutObject('ocr-uploads', 'blank-test.png', imgPath);
+    await s3PutObject('ocr-uploads', 'blank-test.png', imgPath);
 
-    // Wait a reasonable time for Lambda to process
+    // Wait for Lambda to process
     await new Promise(r => setTimeout(r, 30_000));
 
-    // Verify NO output file was created
-    const exists = s3ObjectExists('ocr-output', 'blank-test.txt');
+    const exists = await s3ObjectExists('ocr-output', 'blank-test.txt');
     expect(exists).toBe(false);
 
-    // Verify NO SQS message
-    const messages = sqsReceiveMessages('ocr-results');
+    const messages = await sqsReceiveMessages('ocr-results');
     expect(messages.length).toBe(0);
   });
 
   test('non-image file is ignored by Lambda', async () => {
-    sqsPurge('ocr-results');
+    await sqsPurge('ocr-results');
 
-    // Upload a .txt file — Lambda should skip it
     const txtPath = path.join(TEST_IMAGES_DIR, 'readme.txt');
-    require('fs').writeFileSync(txtPath, 'This is a text file, not an image.');
-    s3PutObject('ocr-uploads', 'readme.txt', txtPath);
+    fs.writeFileSync(txtPath, 'This is a text file, not an image.');
+    await s3PutObject('ocr-uploads', 'readme.txt', txtPath);
 
     await new Promise(r => setTimeout(r, 15_000));
 
-    // No output should be produced
-    const exists = s3ObjectExists('ocr-output', 'readme.txt');
+    const exists = await s3ObjectExists('ocr-output', 'readme.txt');
     expect(exists).toBe(false);
 
-    const messages = sqsReceiveMessages('ocr-results');
+    const messages = await sqsReceiveMessages('ocr-results');
     expect(messages.length).toBe(0);
   });
 });
@@ -184,9 +167,9 @@ test.describe('OCR Pipeline — Multiple Formats', () => {
     const imgPath = path.join(TEST_IMAGES_DIR, 'test-jpeg.jpg');
     generateTestImage('JPEG Format', imgPath);
 
-    s3PutObject('ocr-uploads', 'test-jpeg.jpg', imgPath);
+    await s3PutObject('ocr-uploads', 'test-jpeg.jpg', imgPath);
 
-    const outputText = waitForS3Object('ocr-output', 'test-jpeg.txt', 90_000);
+    const outputText = await waitForS3Object('ocr-output', 'test-jpeg.txt', 90_000);
     expect(outputText).not.toBeNull();
     expect(outputText!.trim().length).toBeGreaterThan(0);
   });
