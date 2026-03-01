@@ -1,0 +1,8 @@
+localstack-data/
+test-results/
+test-images/*.png
+test-images/*.jpg
+node_modules/
+dist/
+*.log
+.env

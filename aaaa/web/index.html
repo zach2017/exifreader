@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Image Upload</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0a0e17;
+            --surface: #111827;
+            --surface-hover: #1a2332;
+            --border: #1e293b;
+            --border-active: #3b82f6;
+            --text: #e2e8f0;
+            --text-dim: #64748b;
+            --accent: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.15);
+            --success: #10b981;
+            --error: #ef4444;
+            --warning: #f59e0b;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: 'DM Sans', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at 30% 20%, rgba(59,130,246,0.06) 0%, transparent 50%),
+                        radial-gradient(ellipse at 70% 80%, rgba(139,92,246,0.04) 0%, transparent 50%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 600px;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .logo h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #e2e8f0, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo p {
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            backdrop-filter: blur(20px);
+        }
+
+        /* ── Drop Zone ── */
+        .dropzone {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dropzone:hover, .dropzone.drag-over {
+            border-color: var(--accent);
+            background: var(--accent-glow);
+        }
+
+        .dropzone.drag-over::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: var(--accent-glow);
+            animation: pulse 1.5s ease infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.6; }
+        }
+
+        .dropzone-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 1rem;
+            opacity: 0.5;
+        }
+
+        .dropzone-icon svg { width: 100%; height: 100%; }
+
+        .dropzone h3 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 0.35rem;
+        }
+
+        .dropzone .hint {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+
+        .dropzone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        /* ── File Preview ── */
+        .file-preview {
+            display: none;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg);
+            border-radius: 8px;
+            margin-top: 1.25rem;
+        }
+
+        .file-preview.visible { display: flex; }
+
+        .file-thumb {
+            width: 56px;
+            height: 56px;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 1px solid var(--border);
+        }
+
+        .file-info { flex: 1; min-width: 0; }
+        .file-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-size {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        .file-remove {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            font-size: 1.2rem;
+            transition: color 0.2s;
+        }
+        .file-remove:hover { color: var(--error); }
+
+        /* ── Upload Button ── */
+        .upload-btn {
+            display: block;
+            width: 100%;
+            padding: 0.85rem;
+            margin-top: 1.5rem;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #fff;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-btn:hover:not(:disabled) {
+            background: #2563eb;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(59,130,246,0.3);
+        }
+
+        .upload-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* ── Progress ── */
+        .progress-bar {
+            display: none;
+            height: 4px;
+            background: var(--bg);
+            border-radius: 4px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+
+        .progress-bar.visible { display: block; }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        /* ── Status ── */
+        .status {
+            margin-top: 1.25rem;
+            padding: 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            display: none;
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.6;
+        }
+
+        .status.visible { display: block; }
+        .status.success { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); color: var(--success); }
+        .status.error { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); color: var(--error); }
+        .status.processing { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); color: var(--accent); }
+
+        /* ── OCR Result ── */
+        .ocr-result {
+            display: none;
+            margin-top: 1.5rem;
+        }
+
+        .ocr-result.visible { display: block; }
+
+        .ocr-result h3 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.75rem;
+        }
+
+        .ocr-text {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            color: var(--text);
+        }
+
+        .ocr-text::-webkit-scrollbar { width: 6px; }
+        .ocr-text::-webkit-scrollbar-track { background: transparent; }
+        .ocr-text::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>⬡ OCR Extract</h1>
+            <p>Upload an image to extract text via Tesseract OCR</p>
+        </div>
+
+        <div class="card">
+            <div class="dropzone" id="dropzone">
+                <div class="dropzone-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                    </svg>
+                </div>
+                <h3>Drop image here or click to browse</h3>
+                <p class="hint">PNG, JPG, TIFF, BMP — max 10 MB</p>
+                <input type="file" id="fileInput" accept="image/png,image/jpeg,image/tiff,image/bmp,image/gif,image/webp" />
+            </div>
+
+            <div class="file-preview" id="filePreview">
+                <img class="file-thumb" id="fileThumb" src="" alt="Preview" />
+                <div class="file-info">
+                    <div class="file-name" id="fileName"></div>
+                    <div class="file-size" id="fileSize"></div>
+                </div>
+                <button class="file-remove" id="fileRemove" title="Remove">✕</button>
+            </div>
+
+            <button class="upload-btn" id="uploadBtn" disabled>Upload & Extract Text</button>
+
+            <div class="progress-bar" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+
+            <div class="status" id="status"></div>
+
+            <div class="ocr-result" id="ocrResult">
+                <h3>Extracted Text</h3>
+                <div class="ocr-text" id="ocrText"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const LOCALSTACK_URL = window.location.hostname === 'localhost'
+            ? 'http://localhost:4566'
+            : 'http://localstack:4566';
+        const UPLOAD_BUCKET = 'ocr-uploads';
+        const OUTPUT_BUCKET = 'ocr-output';
+
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const filePreview = document.getElementById('filePreview');
+        const fileThumb = document.getElementById('fileThumb');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const fileRemove = document.getElementById('fileRemove');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const status = document.getElementById('status');
+        const ocrResult = document.getElementById('ocrResult');
+        const ocrText = document.getElementById('ocrText');
+
+        let selectedFile = null;
+
+        // ── Drag & Drop ──
+        ['dragenter', 'dragover'].forEach(e => {
+            dropzone.addEventListener(e, ev => {
+                ev.preventDefault();
+                dropzone.classList.add('drag-over');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(e => {
+            dropzone.addEventListener(e, ev => {
+                ev.preventDefault();
+                dropzone.classList.remove('drag-over');
+            });
+        });
+
+        dropzone.addEventListener('drop', ev => {
+            const files = ev.dataTransfer.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) handleFile(fileInput.files[0]);
+        });
+
+        fileRemove.addEventListener('click', () => clearFile());
+
+        function handleFile(file) {
+            const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/bmp', 'image/gif', 'image/webp'];
+            if (!validTypes.includes(file.type)) {
+                showStatus('Unsupported file type. Use PNG, JPG, TIFF, or BMP.', 'error');
+                return;
+            }
+            if (file.size > 10 * 1024 * 1024) {
+                showStatus('File too large. Maximum size is 10 MB.', 'error');
+                return;
+            }
+
+            selectedFile = file;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatBytes(file.size);
+
+            const reader = new FileReader();
+            reader.onload = e => { fileThumb.src = e.target.result; };
+            reader.readAsDataURL(file);
+
+            filePreview.classList.add('visible');
+            uploadBtn.disabled = false;
+            hideStatus();
+            ocrResult.classList.remove('visible');
+        }
+
+        function clearFile() {
+            selectedFile = null;
+            fileInput.value = '';
+            filePreview.classList.remove('visible');
+            uploadBtn.disabled = true;
+        }
+
+        // ── Upload ──
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            await uploadAndProcess(selectedFile);
+        });
+
+        async function uploadAndProcess(file) {
+            uploadBtn.disabled = true;
+            progressBar.classList.add('visible');
+            progressFill.style.width = '0%';
+            ocrResult.classList.remove('visible');
+            showStatus('Uploading image to S3…', 'processing');
+
+            try {
+                // 1. Upload to S3
+                const key = file.name;
+                const uploadUrl = `${LOCALSTACK_URL}/${UPLOAD_BUCKET}/${encodeURIComponent(key)}`;
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('PUT', uploadUrl);
+                xhr.setRequestHeader('Content-Type', file.type);
+
+                await new Promise((resolve, reject) => {
+                    xhr.upload.onprogress = e => {
+                        if (e.lengthComputable) {
+                            progressFill.style.width = Math.round((e.loaded / e.total) * 100) + '%';
+                        }
+                    };
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) resolve();
+                        else reject(new Error(`Upload failed: ${xhr.status}`));
+                    };
+                    xhr.onerror = () => reject(new Error('Network error during upload'));
+                    xhr.send(file);
+                });
+
+                showStatus('Upload complete. Waiting for OCR processing…', 'processing');
+                progressFill.style.width = '100%';
+
+                // 2. Poll for the output .txt file
+                const outputKey = key.replace(/\.[^.]+$/, '.txt');
+                const outputUrl = `${LOCALSTACK_URL}/${OUTPUT_BUCKET}/${encodeURIComponent(outputKey)}`;
+
+                let text = null;
+                const maxAttempts = 30;
+                for (let i = 0; i < maxAttempts; i++) {
+                    await sleep(2000);
+                    try {
+                        const resp = await fetch(outputUrl);
+                        if (resp.ok) {
+                            text = await resp.text();
+                            break;
+                        }
+                    } catch (e) { /* retry */ }
+                    showStatus(`Waiting for OCR result… (${i + 1}/${maxAttempts})`, 'processing');
+                }
+
+                if (text && text.trim()) {
+                    showStatus('✓ OCR complete — text extracted successfully!', 'success');
+                    ocrText.textContent = text;
+                    ocrResult.classList.add('visible');
+                } else {
+                    showStatus('OCR complete — no text was detected in the image.', 'error');
+                }
+
+            } catch (err) {
+                showStatus(`Error: ${err.message}`, 'error');
+            } finally {
+                uploadBtn.disabled = false;
+                setTimeout(() => progressBar.classList.remove('visible'), 1000);
+            }
+        }
+
+        // ── Helpers ──
+        function showStatus(msg, type) {
+            status.textContent = msg;
+            status.className = `status visible ${type}`;
+        }
+
+        function hideStatus() {
+            status.className = 'status';
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    </script>
+</body>
+</html>

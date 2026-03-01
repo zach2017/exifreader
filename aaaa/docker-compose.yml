@@ -1,0 +1,108 @@
+version: "3.8"
+
+services:
+  # ─── LocalStack (S3 + SQS + Lambda) ───
+  localstack:
+    image: localstack/localstack:3.7
+    container_name: localstack
+    ports:
+      - "4566:4566"       # LocalStack Gateway
+      - "4510-4559:4510-4559"  # external service ports
+    environment:
+      - SERVICES=s3,sqs,lambda
+      - DEBUG=1
+      - LAMBDA_EXECUTOR=docker
+      - LAMBDA_DOCKER_NETWORK=ocr-network
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT=120
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./scripts:/etc/localstack/init/ready.d"
+      - "localstack-data:/var/lib/localstack"
+    networks:
+      - ocr-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ─── Lambda OCR Docker Image (pre-built) ───
+  lambda-builder:
+    build:
+      context: ./lambda
+      dockerfile: Dockerfile
+    image: ocr-lambda:latest
+    container_name: lambda-builder
+    entrypoint: ["echo", "Lambda image built successfully"]
+    networks:
+      - ocr-network
+
+  # ─── Web Upload UI ───
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: ocr-web
+    ports:
+      - "8080:80"
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      - ocr-network
+
+  # ─── Infrastructure Setup (creates buckets, queues, lambda, triggers) ───
+  setup:
+    image: amazon/aws-cli:2.17.0
+    container_name: ocr-setup
+    depends_on:
+      localstack:
+        condition: service_healthy
+      lambda-builder:
+        condition: service_completed_successfully
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    volumes:
+      - "./scripts:/scripts"
+      - "./lambda:/lambda"
+    entrypoint: ["/bin/sh", "/scripts/setup-aws.sh"]
+    networks:
+      - ocr-network
+
+  # ─── Playwright E2E Tests ───
+  tests:
+    build:
+      context: ./tests
+      dockerfile: Dockerfile
+    container_name: ocr-tests
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      web:
+        condition: service_started
+    environment:
+      - WEB_URL=http://ocr-web:80
+      - LOCALSTACK_URL=http://localstack:4566
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - "./test-results:/app/test-results"
+      - "./test-images:/app/test-images"
+    networks:
+      - ocr-network
+
+volumes:
+  localstack-data:
+
+networks:
+  ocr-network:
+    name: ocr-network
+    driver: bridge
