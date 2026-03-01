@@ -26,6 +26,8 @@ Place your image in the `./images/` directory, then:
 
 ```bash
 docker compose run --rm ocr-client /images/sample.png
+docker compose run --rm ocr-client /images/testimage.jpg
+
 ```
 
 The extracted text will be printed to stdout.
@@ -33,7 +35,6 @@ The extracted text will be printed to stdout.
 ### 3. Optionally specify a language
 
 ```bash
-docker compose run --rm ocr-client /images/sample.png deu
 ```
 
 ## API Reference
