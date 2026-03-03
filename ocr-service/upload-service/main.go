@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 )
 
@@ -35,6 +38,7 @@ var (
 
 func main() {
 	endpoint := os.Getenv("LOCALSTACK_ENDPOINT")
+	log.Printf("Starting upload service with endpoint: %s", endpoint)
 
 	customResolver := aws.EndpointResolverWithOptionsFunc(
 		func(service, region string, options ...interface{}) (aws.Endpoint, error) {
@@ -58,18 +62,95 @@ func main() {
 	})
 	sqsClient = sqs.NewFromConfig(cfg)
 
-	http.HandleFunc("/", serveForm)
-	http.HandleFunc("/upload", handleUpload)
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+	// Wait for LocalStack resources to be ready
+	waitForResources()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", serveForm)
+	mux.HandleFunc("/upload", handleUpload)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	// Wrap with recovery middleware
+	handler := recoveryMiddleware(mux)
+
 	log.Println("Upload service listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", handler))
+}
+
+// waitForResources polls until S3 bucket and SQS queue are available.
+func waitForResources() {
+	bucket := os.Getenv("S3_UPLOAD_BUCKET")
+	queueURL := os.Getenv("SQS_QUEUE_URL")
+
+	log.Printf("Waiting for S3 bucket '%s' and SQS queue...", bucket)
+
+	for i := 0; i < 60; i++ {
+		// Check S3 bucket
+		_, s3Err := s3Client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String(bucket),
+		})
+
+		// Check SQS queue
+		_, sqsErr := sqsClient.GetQueueAttributes(context.TODO(), &sqs.GetQueueAttributesInput{
+			QueueUrl:       aws.String(queueURL),
+			AttributeNames: []sqstypes.QueueAttributeName{sqstypes.QueueAttributeNameAll},
+		})
+
+		if s3Err == nil && sqsErr == nil {
+			log.Println("All resources ready!")
+			return
+		}
+
+		if s3Err != nil {
+			log.Printf("  [%d/60] S3 bucket not ready: %v", i+1, s3Err)
+		}
+		if sqsErr != nil {
+			log.Printf("  [%d/60] SQS queue not ready: %v", i+1, sqsErr)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	log.Println("WARNING: Timed out waiting for resources, starting anyway...")
+}
+
+// recoveryMiddleware catches panics and returns a JSON error instead of crashing.
+func recoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("PANIC recovered: %v", rec)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": fmt.Sprintf("Internal server error: %v", rec),
+				})
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeJSON safely marshals and writes JSON. This is the ONLY way to write JSON responses.
+func writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
+	body, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("JSON marshal error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"internal json encoding error"}`))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(body)
 }
 
 func serveForm(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
 	html := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -159,11 +240,27 @@ func serveForm(w http.ResponseWriter, r *http.Request) {
             border-radius: 8px;
             font-size: 0.9rem;
             display: none;
+            word-break: break-all;
         }
         .status.success { display: block; background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid rgba(34,197,94,0.2); }
-        .status.error { display: block; background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+        .status.error   { display: block; background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
         .status.loading { display: block; background: rgba(59,130,246,0.1); color: #3b82f6; border: 1px solid rgba(59,130,246,0.2); }
         input[type="file"] { display: none; }
+        code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+        .debug {
+            margin-top: 12px;
+            padding: 8px;
+            background: #0f172a;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: #64748b;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -171,105 +268,186 @@ func serveForm(w http.ResponseWriter, r *http.Request) {
         <h1>&#128196; Document Upload</h1>
         <p class="subtitle">Upload documents for text extraction and OCR processing</p>
 
-        <form id="uploadForm" enctype="multipart/form-data">
-            <div class="drop-zone" id="dropZone">
-                <div class="icon">&#128424;</div>
-                <p>Drag & drop a file here or <strong style="color:#3b82f6">click to browse</strong></p>
-                <p class="filename" id="fileName"></p>
-            </div>
-            <input type="file" id="fileInput" name="file"
-                   accept=".pdf,.doc,.docx,.rtf,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.gif">
+        <div class="drop-zone" id="dropZone">
+            <div class="icon">&#128424;</div>
+            <p>Drag &amp; drop a file here or <strong style="color:#3b82f6">click to browse</strong></p>
+            <p class="filename" id="fileName"></p>
+        </div>
+        <input type="file" id="fileInput" name="file"
+               accept=".pdf,.doc,.docx,.rtf,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.gif">
 
-            <div class="supported">
-                <span>PDF</span><span>Word (.doc/.docx)</span><span>RTF</span>
-                <span>PNG</span><span>JPEG</span><span>TIFF</span><span>BMP</span>
-            </div>
+        <div class="supported">
+            <span>PDF</span><span>Word (.doc/.docx)</span><span>RTF</span>
+            <span>PNG</span><span>JPEG</span><span>TIFF</span><span>BMP</span>
+        </div>
 
-            <button type="submit" id="submitBtn" disabled>Upload & Process</button>
-        </form>
+        <button id="submitBtn" disabled>Upload &amp; Process</button>
 
-        <div class="status" id="status"></div>
+        <div class="status" id="statusBox"></div>
+        <div class="debug" id="debugBox"></div>
     </div>
 
     <script>
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
-        const fileName = document.getElementById('fileName');
-        const submitBtn = document.getElementById('submitBtn');
-        const status = document.getElementById('status');
-        const form = document.getElementById('uploadForm');
+        var dropZone = document.getElementById('dropZone');
+        var fileInput = document.getElementById('fileInput');
+        var fileNameEl = document.getElementById('fileName');
+        var submitBtn = document.getElementById('submitBtn');
+        var statusBox = document.getElementById('statusBox');
+        var debugBox = document.getElementById('debugBox');
 
-        dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-        dropZone.addEventListener('drop', e => {
+        function debugLog(msg) {
+            console.log('[upload]', msg);
+            debugBox.style.display = 'block';
+            debugBox.textContent += msg + '\n';
+            debugBox.scrollTop = debugBox.scrollHeight;
+        }
+
+        function showStatus(cls, html) {
+            statusBox.className = 'status ' + cls;
+            statusBox.innerHTML = html;
+        }
+
+        function esc(s) {
+            var d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+            return (bytes/(1024*1024)).toFixed(1) + ' MB';
+        }
+
+        dropZone.addEventListener('click', function() { fileInput.click(); });
+        dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('dragover'); });
+        dropZone.addEventListener('drop', function(e) {
             e.preventDefault();
             dropZone.classList.remove('dragover');
             if (e.dataTransfer.files.length) {
                 fileInput.files = e.dataTransfer.files;
-                updateFileName();
+                onFileSelected();
             }
         });
-        fileInput.addEventListener('change', updateFileName);
+        fileInput.addEventListener('change', onFileSelected);
 
-        function updateFileName() {
+        function onFileSelected() {
             if (fileInput.files.length) {
-                fileName.textContent = fileInput.files[0].name;
+                var f = fileInput.files[0];
+                fileNameEl.textContent = f.name + ' (' + formatSize(f.size) + ')';
                 submitBtn.disabled = false;
             }
         }
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
+        submitBtn.addEventListener('click', function() {
             if (!fileInput.files.length) return;
+            doUpload();
+        });
 
+        async function doUpload() {
+            debugBox.textContent = '';
+            debugBox.style.display = 'none';
             submitBtn.disabled = true;
             submitBtn.textContent = 'Uploading...';
-            status.className = 'status loading';
-            status.textContent = 'Uploading and processing...';
+            showStatus('loading', 'Uploading and processing...');
 
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
+            var theFile = fileInput.files[0];
+            var formData = new FormData();
+            formData.append('file', theFile);
+            debugLog('POST /upload  file=' + theFile.name + '  size=' + theFile.size);
 
+            // Step 1: send the request
+            var resp;
             try {
-                const resp = await fetch('/upload', { method: 'POST', body: formData });
-                const data = await resp.json();
-                if (resp.ok) {
-                    status.className = 'status success';
-                    status.textContent = 'Document ' + data.document_id + ' uploaded successfully! Processing started.';
-                } else {
-                    status.className = 'status error';
-                    status.textContent = 'Error: ' + (data.error || 'Upload failed');
-                }
-            } catch (err) {
-                status.className = 'status error';
-                status.textContent = 'Network error: ' + err.message;
+                resp = await fetch('/upload', { method: 'POST', body: formData });
+            } catch (netErr) {
+                debugLog('NETWORK ERROR: ' + netErr);
+                showStatus('error', 'Cannot reach server. Is the upload service running?');
+                resetBtn();
+                return;
+            }
+            debugLog('HTTP ' + resp.status + '  content-type=' + (resp.headers.get('content-type') || '(none)'));
+
+            // Step 2: read body as text
+            var rawBody;
+            try {
+                rawBody = await resp.text();
+            } catch (readErr) {
+                debugLog('BODY READ ERROR: ' + readErr);
+                showStatus('error', 'Error reading server response');
+                resetBtn();
+                return;
+            }
+            debugLog('Body length=' + rawBody.length);
+            debugLog('Body: ' + rawBody.substring(0, 500));
+
+            // Step 3: try JSON parse
+            var data;
+            try {
+                data = JSON.parse(rawBody);
+            } catch (jsonErr) {
+                debugLog('JSON PARSE ERROR: ' + jsonErr);
+                showStatus('error',
+                    'Server returned non-JSON response (HTTP ' + resp.status + '):<br><code>' +
+                    esc(rawBody.substring(0, 300)) + '</code>');
+                resetBtn();
+                return;
+            }
+            debugLog('Parsed OK: ' + JSON.stringify(data));
+
+            // Step 4: display result
+            if (resp.status >= 200 && resp.status < 300 && data.document_id) {
+                showStatus('success',
+                    '<strong>&#10003; Upload successful!</strong><br>' +
+                    'Document ID: <code>' + esc(data.document_id) + '</code><br>' +
+                    'Status: ' + esc(data.status || 'queued') + '<br>' +
+                    'S3 Key: <code>' + esc(data.s3_key || '') + '</code>');
+                fileNameEl.textContent = '';
+                fileInput.value = '';
+            } else {
+                showStatus('error', 'Error: ' + esc(data.error || 'Upload failed (HTTP ' + resp.status + ')'));
             }
 
-            submitBtn.disabled = false;
+            resetBtn();
+        }
+
+        function resetBtn() {
+            submitBtn.disabled = !fileInput.files.length;
             submitBtn.textContent = 'Upload & Process';
-        });
+        }
     </script>
 </body>
 </html>`
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[UPLOAD] %s /upload from %s", r.Method, r.RemoteAddr)
+
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed, use POST"})
 		return
 	}
 
-	r.ParseMultipartForm(50 << 20) // 50MB max
+	// Parse multipart form (50MB limit)
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		log.Printf("[UPLOAD] ParseMultipartForm error: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "File too large or invalid form data: " + err.Error()})
+		return
+	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		jsonError(w, "Failed to read file", http.StatusBadRequest)
+		log.Printf("[UPLOAD] FormFile error: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No file provided: " + err.Error()})
 		return
 	}
 	defer file.Close()
+
+	log.Printf("[UPLOAD] File: %s  size=%d  content-type=%s", header.Filename, header.Size, header.Header.Get("Content-Type"))
 
 	documentID := uuid.New().String()
 	ext := strings.ToLower(filepath.Ext(header.Filename))
@@ -277,26 +455,36 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	bucket := os.Getenv("S3_UPLOAD_BUCKET")
 
 	contentType := header.Header.Get("Content-Type")
-	if contentType == "" {
+	if contentType == "" || contentType == "application/octet-stream" {
 		contentType = detectContentType(ext)
 	}
 
-	// Upload to S3
-	_, err = s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket:      aws.String(bucket),
-		Key:         aws.String(s3Key),
-		Body:        file,
-		ContentType: aws.String(contentType),
-	})
-	if err != nil {
-		log.Printf("S3 upload error: %v", err)
-		jsonError(w, "Failed to upload to S3", http.StatusInternalServerError)
+	// Buffer the file in memory for reliable S3 upload
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, file); err != nil {
+		log.Printf("[UPLOAD] Read file error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read uploaded file"})
 		return
 	}
 
-	log.Printf("Uploaded %s to s3://%s/%s", header.Filename, bucket, s3Key)
+	// Upload to S3
+	log.Printf("[UPLOAD] Uploading to s3://%s/%s (%d bytes)", bucket, s3Key, buf.Len())
+	_, err = s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(s3Key),
+		Body:        bytes.NewReader(buf.Bytes()),
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		log.Printf("[UPLOAD] S3 PutObject ERROR: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to upload to S3: " + err.Error(),
+		})
+		return
+	}
+	log.Printf("[UPLOAD] S3 upload OK")
 
-	// Send SQS message
+	// Build SQS message
 	msg := SQSMessage{
 		Type:        "file_uploaded",
 		DocumentID:  documentID,
@@ -306,23 +494,31 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 
-	msgBytes, _ := json.Marshal(msg)
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("[UPLOAD] JSON marshal error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal error encoding message"})
+		return
+	}
+
 	queueURL := os.Getenv("SQS_QUEUE_URL")
+	log.Printf("[UPLOAD] Sending SQS message to %s", queueURL)
 
 	_, err = sqsClient.SendMessage(context.TODO(), &sqs.SendMessageInput{
 		QueueUrl:    aws.String(queueURL),
 		MessageBody: aws.String(string(msgBytes)),
 	})
 	if err != nil {
-		log.Printf("SQS send error: %v", err)
-		jsonError(w, "File uploaded but failed to queue processing", http.StatusInternalServerError)
+		log.Printf("[UPLOAD] SQS SendMessage ERROR: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "File saved to S3 but failed to queue for processing: " + err.Error(),
+		})
 		return
 	}
 
-	log.Printf("Queued processing for document %s", documentID)
+	log.Printf("[UPLOAD] SUCCESS document_id=%s", documentID)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"document_id": documentID,
 		"status":      "queued",
 		"s3_key":      s3Key,
@@ -347,10 +543,4 @@ func detectContentType(ext string) string {
 		return ct
 	}
 	return "application/octet-stream"
-}
-
-func jsonError(w http.ResponseWriter, msg string, code int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

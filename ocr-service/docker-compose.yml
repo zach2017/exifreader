@@ -9,14 +9,26 @@ services:
     environment:
       - SERVICES=s3,sqs
       - DEFAULT_REGION=us-east-1
+      - SQS_ENDPOINT_STRATEGY=path
     volumes:
-      - "./localstack-init:/etc/localstack/init/ready.d"
       - "localstack-data:/var/lib/localstack"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  init-service:
+    build: ./init-service
+    container_name: init-service
+    environment:
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
 
   upload-service:
     build: ./upload-service
@@ -29,10 +41,10 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - S3_UPLOAD_BUCKET=uploads
-      - SQS_QUEUE_URL=http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/file-processing
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/file-processing
     depends_on:
-      localstack:
-        condition: service_healthy
+      init-service:
+        condition: service_completed_successfully
 
   text-extract-service:
     build: ./text-extract-service
@@ -45,11 +57,11 @@ services:
       - S3_UPLOAD_BUCKET=uploads
       - S3_EXTRACTED_BUCKET=extracted-text
       - S3_TMP_BUCKET=tmp-files
-      - SQS_FILE_QUEUE_URL=http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/file-processing
-      - SQS_OCR_QUEUE_URL=http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/ocr-processing
+      - SQS_FILE_QUEUE_URL=http://localstack:4566/000000000000/file-processing
+      - SQS_OCR_QUEUE_URL=http://localstack:4566/000000000000/ocr-processing
     depends_on:
-      localstack:
-        condition: service_healthy
+      init-service:
+        condition: service_completed_successfully
 
   ocr-service:
     build: ./ocr-service
@@ -62,11 +74,11 @@ services:
       - S3_UPLOAD_BUCKET=uploads
       - S3_TMP_BUCKET=tmp-files
       - S3_OCR_EXTRACTED_BUCKET=tmp-extracted-text
-      - SQS_OCR_QUEUE_URL=http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/ocr-processing
-      - SQS_OCR_COMPLETE_QUEUE_URL=http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/ocr-complete
+      - SQS_OCR_QUEUE_URL=http://localstack:4566/000000000000/ocr-processing
+      - SQS_OCR_COMPLETE_QUEUE_URL=http://localstack:4566/000000000000/ocr-complete
     depends_on:
-      localstack:
-        condition: service_healthy
+      init-service:
+        condition: service_completed_successfully
 
 volumes:
   localstack-data:

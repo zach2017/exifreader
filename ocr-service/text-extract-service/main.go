@@ -70,8 +70,34 @@ func main() {
 	})
 	sqsClient = sqs.NewFromConfig(cfg)
 
+	// Wait for LocalStack resources
+	waitForResources()
+
 	log.Println("Text Extract Service started. Polling for messages...")
 	pollMessages()
+}
+
+func waitForResources() {
+	bucket := os.Getenv("S3_UPLOAD_BUCKET")
+	queueURL := os.Getenv("SQS_FILE_QUEUE_URL")
+
+	log.Printf("Waiting for S3 bucket '%s' and SQS queue...", bucket)
+	for i := 0; i < 60; i++ {
+		_, s3Err := s3Client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String(bucket),
+		})
+		_, sqsErr := sqsClient.GetQueueAttributes(context.TODO(), &sqs.GetQueueAttributesInput{
+			QueueUrl:       aws.String(queueURL),
+			AttributeNames: []sqstypes.QueueAttributeName{sqstypes.QueueAttributeNameAll},
+		})
+		if s3Err == nil && sqsErr == nil {
+			log.Println("All resources ready!")
+			return
+		}
+		log.Printf("  [%d/60] Waiting... s3=%v sqs=%v", i+1, s3Err, sqsErr)
+		time.Sleep(2 * time.Second)
+	}
+	log.Println("WARNING: Timed out waiting for resources, starting anyway...")
 }
 
 func pollMessages() {
