@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF → S3 Image Extractor</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0e14;
+    --surface: #121820;
+    --surface2: #1a2230;
+    --border: #243044;
+    --text: #c5cdd9;
+    --text-dim: #6b7a8d;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59,130,246,0.15);
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --radius: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  /* ─── Header ─── */
+  header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  header .badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-glow);
+    border: 1px solid rgba(59,130,246,0.25);
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 16px;
+  }
+
+  header h1 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #eef1f6;
+    margin-bottom: 8px;
+  }
+
+  header p {
+    color: var(--text-dim);
+    font-size: 15px;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+
+  /* ─── Cards ─── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+
+  .card-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-title .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: inline-block;
+  }
+
+  /* ─── Drop Zone ─── */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+  }
+
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+  }
+
+  .dropzone.has-file {
+    border-color: var(--green);
+    border-style: solid;
+    background: rgba(34,197,94,0.06);
+  }
+
+  .dropzone input { display: none; }
+
+  .dropzone-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.6;
+  }
+
+  .dropzone-text {
+    font-size: 15px;
+    color: var(--text-dim);
+  }
+
+  .dropzone-text strong {
+    color: var(--accent);
+  }
+
+  .file-info {
+    margin-top: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--green);
+  }
+
+  /* ─── Button ─── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 28px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(59,130,246,0.25);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: #2563eb;
+    box-shadow: 0 0 30px rgba(59,130,246,0.4);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  .btn-sm {
+    padding: 8px 16px;
+    font-size: 12px;
+  }
+
+  .btn-ghost {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--accent);
+  }
+
+  .actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    align-items: center;
+  }
+
+  /* ─── Progress ─── */
+  .progress-wrap {
+    margin-top: 24px;
+    display: none;
+  }
+
+  .progress-wrap.active { display: block; }
+
+  .progress-bar-bg {
+    width: 100%;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), #818cf8);
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+
+  .progress-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ─── Stats Grid ─── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+  }
+
+  .stat-box {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: #eef1f6;
+  }
+
+  /* ─── Results Table ─── */
+  .results-card { display: none; }
+  .results-card.active { display: block; }
+
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .results-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .results-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(36,48,68,0.5);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    vertical-align: middle;
+  }
+
+  .results-table tr:hover td {
+    background: var(--surface2);
+  }
+
+  .s3-link {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+  }
+
+  .s3-link:hover { text-decoration: underline; }
+
+  .size-badge {
+    background: var(--surface2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .page-badge {
+    background: var(--accent-glow);
+    color: var(--accent);
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  /* ─── SQS Messages ─── */
+  .msg-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .msg-item {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    border-left: 3px solid var(--accent);
+  }
+
+  .msg-item .key { color: var(--text-dim); }
+  .msg-item .val { color: var(--text); }
+
+  /* ─── Preview Modal ─── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    padding: 40px;
+  }
+
+  .modal-overlay.active { display: flex; }
+
+  .modal-overlay img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+
+  /* ─── Toast ─── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.3s ease;
+    z-index: 999;
+  }
+
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { background: var(--green); }
+  .toast.error { background: var(--red); }
+
+  /* ─── Spinner ─── */
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <header>
+    <div class="badge">LocalStack • S3 • SQS • PyMuPDF</div>
+    <h1>PDF → Image Extractor</h1>
+    <p>Upload a PDF to extract page images into S3 and publish processing events to SQS — all running locally.</p>
+  </header>
+
+  <!-- Upload Card -->
+  <div class="card">
+    <div class="card-title"><span class="dot"></span> Upload Document</div>
+
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+      <input type="file" id="fileInput" accept=".pdf">
+      <div class="dropzone-icon">📄</div>
+      <div class="dropzone-text">
+        Drop your PDF here or <strong>click to browse</strong>
+      </div>
+      <div class="file-info" id="fileInfo"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="uploadBtn" disabled onclick="uploadPDF()">
+        <span id="uploadBtnText">Extract Pages</span>
+        <span class="spinner hidden" id="uploadSpinner"></span>
+      </button>
+      <button class="btn btn-sm btn-ghost" onclick="resetForm()">Clear</button>
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-status">
+        <span id="progressLabel">Processing…</span>
+        <span id="progressPct">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Card -->
+  <div class="card" id="statsCard">
+    <div class="card-title"><span class="dot" style="background:var(--green)"></span> Service Status</div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-label">S3 Objects</div>
+        <div class="stat-value" id="s3Count">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">SQS Available</div>
+        <div class="stat-value" id="sqsAvail">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">SQS In-Flight</div>
+        <div class="stat-value" id="sqsFlight">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Last Upload</div>
+        <div class="stat-value" id="lastUpload" style="font-size:14px;">—</div>
+      </div>
+    </div>
+    <div style="margin-top:14px;">
+      <button class="btn btn-sm btn-ghost" onclick="refreshStats()">↻ Refresh Stats</button>
+    </div>
+  </div>
+
+  <!-- Results Table -->
+  <div class="card results-card" id="resultsCard">
+    <div class="card-title"><span class="dot" style="background:var(--amber)"></span> Extracted Pages</div>
+    <div style="overflow-x:auto;">
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th>Page</th>
+            <th>S3 Key</th>
+            <th>Size</th>
+            <th>Preview</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SQS Messages -->
+  <div class="card results-card" id="sqsCard">
+    <div class="card-title"><span class="dot" style="background:var(--amber)"></span> SQS Messages</div>
+    <div class="msg-list" id="sqsMsgList"></div>
+    <div style="margin-top:14px;">
+      <button class="btn btn-sm btn-ghost" onclick="loadSQSMessages()">↻ Refresh Messages</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image Preview Modal -->
+<div class="modal-overlay" id="previewModal" onclick="closePreview()">
+  <img id="previewImg" src="" alt="Page preview">
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileInfo  = document.getElementById('fileInfo');
+const uploadBtn = document.getElementById('uploadBtn');
+let selectedFile = null;
+
+// ─── Drag & Drop ────────────────────────────────
+['dragenter','dragover'].forEach(e => {
+  dropzone.addEventListener(e, ev => {
+    ev.preventDefault();
+    dropzone.classList.add('drag-over');
+  });
+});
+
+['dragleave','drop'].forEach(e => {
+  dropzone.addEventListener(e, ev => {
+    ev.preventDefault();
+    dropzone.classList.remove('drag-over');
+  });
+});
+
+dropzone.addEventListener('drop', e => {
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') selectFile(file);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) selectFile(fileInput.files[0]);
+});
+
+function selectFile(file) {
+  selectedFile = file;
+  const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+  fileInfo.textContent = `✓ ${file.name}  (${sizeMB} MB)`;
+  dropzone.classList.add('has-file');
+  uploadBtn.disabled = false;
+}
+
+function resetForm() {
+  selectedFile = null;
+  fileInput.value = '';
+  fileInfo.textContent = '';
+  dropzone.classList.remove('has-file');
+  uploadBtn.disabled = true;
+  document.getElementById('progressWrap').classList.remove('active');
+}
+
+// ─── Upload ─────────────────────────────────────
+async function uploadPDF() {
+  if (!selectedFile) return;
+
+  const btnText = document.getElementById('uploadBtnText');
+  const spinner = document.getElementById('uploadSpinner');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressLabel = document.getElementById('progressLabel');
+  const progressPct   = document.getElementById('progressPct');
+
+  uploadBtn.disabled = true;
+  btnText.textContent = 'Processing…';
+  spinner.classList.remove('hidden');
+  progressWrap.classList.add('active');
+  progressFill.style.width = '15%';
+  progressLabel.textContent = 'Uploading PDF…';
+  progressPct.textContent = '15%';
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+
+  try {
+    progressFill.style.width = '35%';
+    progressPct.textContent = '35%';
+    progressLabel.textContent = 'Converting pages…';
+
+    const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+
+    progressFill.style.width = '80%';
+    progressPct.textContent = '80%';
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'Upload failed');
+    }
+
+    const data = await resp.json();
+
+    progressFill.style.width = '100%';
+    progressPct.textContent = '100%';
+    progressLabel.textContent = `Done — ${data.total_pages} pages extracted`;
+
+    showToast(`${data.total_pages} pages extracted to S3`, 'success');
+    renderResults(data);
+    refreshStats();
+    loadSQSMessages();
+    document.getElementById('lastUpload').textContent = data.document_name;
+
+  } catch (err) {
+    showToast(err.message, 'error');
+    progressLabel.textContent = 'Error: ' + err.message;
+    progressFill.style.width = '100%';
+    progressFill.style.background = 'var(--red)';
+  } finally {
+    btnText.textContent = 'Extract Pages';
+    spinner.classList.add('hidden');
+    uploadBtn.disabled = false;
+  }
+}
+
+// ─── Render Results ────────────────────────────
+function renderResults(data) {
+  const card = document.getElementById('resultsCard');
+  const body = document.getElementById('resultsBody');
+  card.classList.add('active');
+  body.innerHTML = '';
+
+  data.pages.forEach(p => {
+    const sizeFmt = p.image_size_bytes > 1024*1024
+      ? (p.image_size_bytes/1024/1024).toFixed(1)+' MB'
+      : (p.image_size_bytes/1024).toFixed(0)+' KB';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span class="page-badge">${p.page}</span></td>
+      <td><span class="s3-link" title="${p.s3_uri}">${p.s3_key}</span></td>
+      <td><span class="size-badge">${sizeFmt}</span></td>
+      <td><button class="btn btn-sm btn-ghost" onclick="previewImage('${p.s3_key}')">🔍 View</button></td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+// ─── Stats ──────────────────────────────────────
+async function refreshStats() {
+  try {
+    const [s3Resp, sqsResp] = await Promise.all([
+      fetch('/api/s3/list').then(r => r.json()),
+      fetch('/api/queue/stats').then(r => r.json()),
+    ]);
+    document.getElementById('s3Count').textContent = s3Resp.count ?? 0;
+    document.getElementById('sqsAvail').textContent = sqsResp.messages_available ?? 0;
+    document.getElementById('sqsFlight').textContent = sqsResp.messages_in_flight ?? 0;
+  } catch { /* silent */ }
+}
+
+// ─── SQS Messages ───────────────────────────────
+async function loadSQSMessages() {
+  try {
+    const data = await fetch('/api/queue/messages?max=10').then(r => r.json());
+    const card = document.getElementById('sqsCard');
+    const list = document.getElementById('sqsMsgList');
+
+    if (data.messages && data.messages.length > 0) {
+      card.classList.add('active');
+      list.innerHTML = '';
+      data.messages.forEach(m => {
+        const b = m.body;
+        const div = document.createElement('div');
+        div.className = 'msg-item';
+        div.innerHTML = `
+          <span class="key">doc:</span> <span class="val">${b.document_name}</span><br>
+          <span class="key">page:</span> <span class="val">${b.page_number} / ${b.total_pages}</span><br>
+          <span class="key">s3:</span> <span class="val">${b.s3_key}</span><br>
+          <span class="key">size:</span> <span class="val">${(b.image_size_bytes/1024).toFixed(0)} KB</span>
+          <span class="key" style="margin-left:12px">dpi:</span> <span class="val">${b.dpi}</span>
+        `;
+        list.appendChild(div);
+      });
+    }
+  } catch { /* silent */ }
+}
+
+// ─── Image Preview ──────────────────────────────
+function previewImage(s3Key) {
+  const modal = document.getElementById('previewModal');
+  const img   = document.getElementById('previewImg');
+  img.src = `/api/s3/image/${s3Key}`;
+  modal.classList.add('active');
+}
+
+function closePreview() {
+  document.getElementById('previewModal').classList.remove('active');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
+
+// ─── Toast ──────────────────────────────────────
+function showToast(message, type = 'success') {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.className = `toast ${type} show`;
+  setTimeout(() => toast.classList.remove('show'), 3500);
+}
+
+// Initial stats load
+refreshStats();
+</script>
+
+</body>
+</html>
